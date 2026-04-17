@@ -3,18 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pink Tour | Gesture Video Control</title>
+    <title>Pink Tour | Gesture Control Pro</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { overflow: hidden; background: #000; font-family: 'Pretendard', sans-serif; }
 
-        /* 메인 비디오 전력 질주 */
         #video {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             object-fit: cover; z-index: 1;
         }
 
-        /* 웹캠 오버레이 */
         #webcam-container {
             position: fixed; bottom: 30px; left: 30px; width: 320px; height: 180px;
             background: #000; border: 2px solid #0f0; border-radius: 12px;
@@ -23,43 +21,45 @@
         #webcam { display: none; }
         #canvas { width: 100%; height: 100%; transform: scaleX(-1); display: block; }
 
-        /* 상태 UI */
         #status-card {
             position: fixed; top: 20px; left: 20px; z-index: 1000;
-            background: rgba(0, 0, 0, 0.8); color: #fff; padding: 20px;
-            border-radius: 12px; border: 1px solid #333; min-width: 250px;
+            background: rgba(0, 0, 0, 0.85); color: #fff; padding: 20px;
+            border-radius: 12px; border: 1px solid #333; min-width: 260px;
             backdrop-filter: blur(10px);
         }
-        .label { color: #888; font-size: 12px; text-transform: uppercase; }
-        .value { color: #0f0; font-weight: bold; font-family: monospace; }
-        .progress-bar {
-            width: 100%; height: 4px; background: #333; margin-top: 10px; border-radius: 2px;
-        }
-        #fill { height: 100%; background: #0f0; width: 0%; transition: width 0.1s linear; }
+        .label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        .value { color: #0f0; font-weight: bold; font-family: 'JetBrains Mono', monospace; font-size: 18px; }
+        .progress-bar { width: 100%; height: 6px; background: #222; margin-top: 12px; border-radius: 3px; overflow: hidden; }
+        #fill { height: 100%; background: linear-gradient(90deg, #0f0, #008000); width: 0%; }
 
-        /* 로딩 화면 */
         #loading {
             position: fixed; inset: 0; background: #000; color: #0f0;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 2000; font-weight: bold;
+            z-index: 2000; letter-spacing: 2px;
         }
     </style>
 </head>
 <body>
 
-<video id="video" src="01.mp4" preload="auto" muted loop></video>
+<video id="video" src="01.mp4" preload="auto" muted></video>
 
 <div id="loading">
-    <div>SYSTEM INITIALIZING...</div>
-    <div id="load-msg" style="font-size: 12px; color: #666; margin-top: 10px;">Loading AI Models...</div>
+    <div style="font-size: 24px; margin-bottom: 10px;">PROXIMITY ENGINE</div>
+    <div id="load-msg" style="font-size: 12px; color: #555;">Initializing Neural Networks...</div>
 </div>
 
 <div id="status-card">
-    <div style="margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-        <span style="color: #0f0;">⚡ PRO MODE</span>
+    <div style="margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 8px;">
+        <span style="color: #0f0; font-weight: 800; font-size: 14px;">G-CONTROL ACTIVE</span>
     </div>
-    <div><span class="label">Gesture:</span> <span id="g-stat" class="value">IDLE</span></div>
-    <div><span class="label">Speed:</span> <span id="s-stat" class="value">1.0x</span></div>
+    <div style="margin-bottom: 8px;">
+        <p class="label">Action</p>
+        <p id="g-stat" class="value" style="color: #fff;">READY</p>
+    </div>
+    <div>
+        <p class="label">Playback Rate</p>
+        <p id="s-stat" class="value">0.0x</p>
+    </div>
     <div class="progress-bar"><div id="fill"></div></div>
 </div>
 
@@ -79,57 +79,76 @@
     const ctx = canvas.getContext('2d');
     const fill = document.getElementById('fill');
     
-    // --- 최적화 설정값 ---
-    const PINCH_VAL = 0.04;    // 모으기 기준 (되감기)
-    const OPEN_VAL = 0.12;     // 벌리기 기준 (재생)
-    const SMOOTHING = 0.25;    // 필터링 (높을수록 반응빠름, 낮을수록 부드러움)
+    // --- 감도 조절 파라미터 ---
+    const PINCH_VAL = 0.045;   // 모으기 (되감기)
+    const OPEN_VAL = 0.12;     // 벌리기 (재생)
+    const SMOOTHING = 0.2;     // 필터링 (0.1 ~ 0.3 권장)
     
     let smoothedDistance = 0;
     let targetRate = 0;
     let lastTime = performance.now();
 
-    // 1. Hands 모델 초기화 (RTX 5070 Ti 파워 활용)
     const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
 
     hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1, // 0은 빠르고 1은 정확함. 혜림님 사양이면 1 추천!
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
+        modelComplexity: 1,
+        minDetectionConfidence: 0.75,
+        minTrackingConfidence: 0.75
     });
 
     hands.onResults(onResults);
 
-    // 2. 메인 루프: 비디오 제어 (requestAnimationFrame 사용)
+    // [핵심 로직] 비디오 상태 업데이트 루프
     function update() {
         const now = performance.now();
-        const dt = (now - lastTime) / 1000; // 프레임 간 시간 간격
+        const dt = (now - lastTime) / 1000;
         lastTime = now;
 
+        const isAtEnd = video.currentTime >= video.duration - 0.01;
+        const isAtStart = video.currentTime <= 0;
+
         if (targetRate > 0) {
-            // 정방향 재생: 브라우저 네이티브 엔진 사용
-            video.playbackRate = targetRate;
-            if (video.paused) video.play().catch(()=>{});
-            document.getElementById('g-stat').textContent = "FORWARD";
-            document.getElementById('g-stat').style.color = "#0f0";
+            // 재생 (벌리기)
+            if (isAtEnd) {
+                // 영상 끝이면 멈춤 유지
+                video.pause();
+                video.currentTime = video.duration;
+                document.getElementById('g-stat').textContent = "FINISHED";
+                document.getElementById('g-stat').style.color = "#ff4d4d";
+                document.getElementById('s-stat').textContent = "0.0x";
+            } else {
+                video.playbackRate = targetRate;
+                if (video.paused) video.play().catch(()=>{});
+                document.getElementById('g-stat').textContent = "FORWARDING";
+                document.getElementById('g-stat').style.color = "#0f0";
+                document.getElementById('s-stat').textContent = targetRate.toFixed(1) + "x";
+            }
         } else if (targetRate < 0) {
-            // 역방향 재생: 수동 currentTime 조절 (가장 부드러움)
+            // 되감기 (모으기)
             video.pause();
-            const rewindSpeed = Math.abs(targetRate) * dt;
-            video.currentTime = Math.max(0, video.currentTime - rewindSpeed);
-            document.getElementById('g-stat').textContent = "REWIND";
-            document.getElementById('g-stat').style.color = "#f60";
+            if (isAtStart) {
+                video.currentTime = 0;
+                document.getElementById('g-stat').textContent = "START POINT";
+                document.getElementById('g-stat').style.color = "#aaa";
+            } else {
+                const rewindSpeed = Math.abs(targetRate) * dt;
+                video.currentTime -= rewindSpeed;
+                document.getElementById('g-stat').textContent = "REWINDING";
+                document.getElementById('g-stat').style.color = "#ff9900";
+            }
+            document.getElementById('s-stat').textContent = targetRate.toFixed(1) + "x";
         } else {
-            // 정지
+            // 정지 (중간 상태)
             video.pause();
-            document.getElementById('g-stat').textContent = "PAUSED";
-            document.getElementById('g-stat').style.color = "#fff";
+            document.getElementById('g-stat').textContent = isAtEnd ? "FINISHED" : "PAUSED";
+            document.getElementById('g-stat').style.color = isAtEnd ? "#ff4d4d" : "#fff";
+            document.getElementById('s-stat').textContent = "0.0x";
         }
 
-        // UI 업데이트
-        document.getElementById('s-stat').textContent = (targetRate === 0 ? "0.0" : targetRate.toFixed(1)) + "x";
+        // 프로그레스 바
         if (video.duration) {
             fill.style.width = (video.currentTime / video.duration * 100) + "%";
         }
@@ -137,7 +156,6 @@
         requestAnimationFrame(update);
     }
 
-    // 3. 거리 계산 및 필터링
     function onResults(results) {
         ctx.save();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -145,51 +163,49 @@
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
-            
-            // 엄지(4)와 검지(8) 거리 측정
-            const dx = landmarks[4].x - landmarks[8].x;
-            const dy = landmarks[4].y - landmarks[8].y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+            const dist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
 
-            // 지수 이동 평균(EMA) 필터링 - 손떨림 보정 핵심
+            // 필터링 적용
             smoothedDistance = (dist * SMOOTHING) + (smoothedDistance * (1 - SMOOTHING));
 
-            // 제스처 판정
             if (smoothedDistance < PINCH_VAL) {
-                targetRate = -2.5; // 모으면 2.5배속 되감기
+                targetRate = -3.0; // 되감기 속도
             } else if (smoothedDistance > OPEN_VAL) {
-                // 벌린 정도에 따라 0.5x ~ 3.0x 가변 속도
-                const rawRate = 0.5 + (smoothedDistance - OPEN_VAL) * 10;
-                targetRate = Math.min(rawRate, 3.0);
+                const speed = 0.5 + (smoothedDistance - OPEN_VAL) * 12;
+                targetRate = Math.min(speed, 4.0); // 최대 4배속
             } else {
-                targetRate = 0; // 중간 단계는 정지
+                targetRate = 0;
             }
 
-            // 시각화
-            drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#0f0', lineWidth: 2});
-            drawLandmarks(ctx, landmarks, {color: '#f00', lineWidth: 1, radius: 2});
+            // 시각화 (깔끔하게 수정)
+            drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#0f0', lineWidth: 3});
+            // 엄지, 검지 포인트만 크게 강조
+            [4, 8].forEach(idx => {
+                ctx.beginPath();
+                ctx.arc(landmarks[idx].x * canvas.width, landmarks[idx].y * canvas.height, 6, 0, 2*Math.PI);
+                ctx.fillStyle = "#fff";
+                ctx.fill();
+            });
         } else {
-            targetRate = 0; // 손이 없으면 정지
+            targetRate = 0;
         }
         ctx.restore();
     }
 
-    // 4. 초기화 실행
     async function init() {
         const camera = new Camera(webcam, {
-            onFrame: async () => {
-                await hands.send({image: webcam});
-            },
-            width: 640,
-            height: 360
+            onFrame: async () => { await hands.send({image: webcam}); },
+            width: 640, height: 360
         });
 
-        video.addEventListener('loadedmetadata', () => {
+        video.onloadedmetadata = () => {
             document.getElementById('loading').style.display = 'none';
             camera.start();
-            update(); // 렌더 루프 시작
-            console.log("System Ready.");
-        });
+            update();
+        };
+        
+        // 영상 소스 로드 확인
+        video.load();
     }
 
     window.onload = init;
