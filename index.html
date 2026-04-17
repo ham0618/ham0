@@ -32,7 +32,7 @@
         bottom: 30px;
         left: 30px;
         width: 400px;
-        height: 225px; /* 16:9 비율 */
+        height: 225px;
         background: #000;
         border: 3px solid #333;
         border-radius: 10px;
@@ -140,8 +140,7 @@
     </style>
   </head>
   <body>
-    <!-- preload="metadata"로 변경하여 메모리 절약 -->
-    <video id="video" src="01.mp4" preload="metadata"></video>
+    <video id="video" src="01.mp4" preload="auto" muted></video>
 
     <div id="webcam-container">
       <div id="zone-info">✋ 이 영역에 손을 펼치세요</div>
@@ -196,14 +195,14 @@
       // 상수
       const MIN_RATIO = 1.0;
       const MAX_RATIO = 2.2;
-      const LERP_FACTOR = 0.15;
+      const LERP_FACTOR = 0.08; // 더 부드럽게
 
-      // 감지 영역 설정 (캔버스 기준 비율 - 넉넉하게)
+      // 감지 영역 설정
       const ZONE = {
-        x: 0.1,       // 좌측 10%
-        y: 0.1,       // 상단 10%
-        width: 0.8,   // 너비 80%
-        height: 0.8   // 높이 80%
+        x: 0.1,
+        y: 0.1,
+        width: 0.8,
+        height: 0.8
       };
 
       // 상태
@@ -214,8 +213,9 @@
       let lastFrameTime = Date.now();
       let frameCount = 0;
       let fps = 0;
+      let isSeeking = false;
 
-      // MediaPipe Hands 설정 (성능 최적화)
+      // MediaPipe Hands 설정
       const hands = new Hands({
         locateFile: (file) => {
           return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
@@ -224,20 +224,20 @@
 
       hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 0,  // 1 → 0 (가벼운 모델)
+        modelComplexity: 0,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
 
       hands.onResults(onResults);
 
-      // 웹캠 설정 (해상도 낮춤)
+      // 웹캠 설정
       async function initCamera() {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             video: {
-              width: { ideal: 1280 },  // 1920 → 1280
-              height: { ideal: 720 },  // 1080 → 720
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
               aspectRatio: { ideal: 16/9 },
               facingMode: "user",
               frameRate: { ideal: 30 }
@@ -251,11 +251,9 @@
             webcam.onloadedmetadata = () => {
               webcam.play();
               
-              // 캔버스 해상도 낮춤 (성능 향상)
-              canvas.width = 640;   // 1920 → 640
-              canvas.height = 360;  // 1080 → 360
+              canvas.width = 640;
+              canvas.height = 360;
               
-              // 감지 영역 표시
               updateDetectionZone();
               
               console.log(`카메라 해상도: ${canvas.width}x${canvas.height}`);
@@ -269,7 +267,6 @@
         }
       }
 
-      // 감지 영역 표시 업데이트
       function updateDetectionZone() {
         detectionZone.style.left = `${ZONE.x * 100}%`;
         detectionZone.style.top = `${ZONE.y * 100}%`;
@@ -277,9 +274,7 @@
         detectionZone.style.height = `${ZONE.height * 100}%`;
       }
 
-      // 손이 감지 영역 안에 있는지 확인
       function isHandInDetectionZone(landmarks) {
-        // 손바닥 중심점들
         const wrist = landmarks[0];
         const thumbCMC = landmarks[1];
         const indexMCP = landmarks[5];
@@ -287,11 +282,9 @@
         const ringMCP = landmarks[13];
         const pinkyMCP = landmarks[17];
         
-        // 손바닥 중심 계산
         const centerX = (wrist.x + thumbCMC.x + indexMCP.x + middleMCP.x + ringMCP.x + pinkyMCP.x) / 6;
         const centerY = (wrist.y + thumbCMC.y + indexMCP.y + middleMCP.y + ringMCP.y + pinkyMCP.y) / 6;
 
-        // 영역 내에 있는지 확인
         const inZone = 
           centerX >= ZONE.x && 
           centerX <= (ZONE.x + ZONE.width) &&
@@ -337,10 +330,8 @@
         ) {
           const landmarks = results.multiHandLandmarks[0];
 
-          // 손이 영역 안에 있는지 확인
           isHandInZone = isHandInDetectionZone(landmarks);
 
-          // 손 랜드마크 그리기
           drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
             color: isHandInZone ? "#00FF00" : "#FF6600",
             lineWidth: 3,
@@ -352,12 +343,10 @@
             radius: 4,
           });
 
-          // UI 업데이트
           handStatusEl.textContent = "✅ 예";
           handStatusEl.style.color = "#0f0";
 
           if (isHandInZone) {
-            // 영역 안에 있을 때만 손 펼침 정도 계산
             const openness = calculateHandOpenness(landmarks);
             targetSeekRatio = openness;
             
@@ -408,10 +397,8 @@
           return Math.sqrt(dx * dx + dy * dy + dz * dz);
         }
 
-        // 손바닥 크기
         const palmSize = distance(wrist, middleMCP);
         
-        // 모든 손가락 끝과 손목 사이 거리
         const avgDistance =
           (distance(thumbTip, wrist) +
             distance(indexTip, wrist) +
@@ -427,9 +414,9 @@
         return clamped;
       }
 
-      // 프레임 처리 (throttle 적용)
+      // 프레임 처리
       let lastProcessTime = 0;
-      const PROCESS_INTERVAL = 33; // 약 30fps
+      const PROCESS_INTERVAL = 33;
 
       async function processFrame() {
         const now = Date.now();
@@ -449,68 +436,46 @@
         requestAnimationFrame(processFrame);
       }
 
-      // 비디오 업데이트 최적화
-      let lastUpdateTime = 0;
-      const UPDATE_INTERVAL = 16; // 약 60fps
-
+      // 비디오 업데이트 - 부드러운 시킹
       function updateVideo() {
-        const now = Date.now();
-        
-        if (now - lastUpdateTime >= UPDATE_INTERVAL) {
-          lastUpdateTime = now;
+        if (isHandInZone) {
+          currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
+        }
+
+        if (video.duration && !isNaN(video.duration) && !isSeeking) {
+          const targetTime = currentSeekRatio * video.duration;
           
-          // 영역 안에 손이 있을 때만 부드럽게 이동
-          if (isHandInZone) {
-            currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
+          // 큰 차이가 있을 때만 시킹 (끊김 방지)
+          if (Math.abs(video.currentTime - targetTime) > 0.05) {
+            isSeeking = true;
+            video.currentTime = targetTime;
           }
 
-          if (video.duration && !isNaN(video.duration)) {
-            const targetTime = currentSeekRatio * video.duration;
-            
-            // 비디오 시간 업데이트 (작은 변화는 무시)
-            if (Math.abs(video.currentTime - targetTime) > 0.1) {
-              video.currentTime = targetTime;
-            }
-
-            positionEl.textContent = `${targetTime.toFixed(1)}초 / ${video.duration.toFixed(1)}초`;
-          }
+          positionEl.textContent = `${targetTime.toFixed(1)}초 / ${video.duration.toFixed(1)}초`;
         }
 
         requestAnimationFrame(updateVideo);
       }
 
+      // 시킹 완료 이벤트
+      video.addEventListener('seeked', () => {
+        isSeeking = false;
+      });
+
+      // 시킹 중 이벤트
+      video.addEventListener('seeking', () => {
+        isSeeking = true;
+      });
+
       async function init() {
         try {
-          // 비디오 로드 대기
+          // 비디오 완전히 로드
           video.load();
           
+          // 비디오 로드 대기
+          await new Promise((resolve) => {
+            video.addEventListener('loadeddata', resolve, { once: true });
+          });
+
           await initCamera();
           loadingEl.style.display = "none";
-          processFrame();
-          console.log("✅ 초기화 완료");
-        } catch (err) {
-          loadingEl.textContent = "❌ 초기화 실패: " + err.message;
-          loadingEl.style.color = "#f00";
-        }
-      }
-
-      video.addEventListener("loadedmetadata", () => {
-        updateVideo();
-      });
-
-      video.addEventListener("play", () => {
-        video.pause();
-      });
-
-      // 메모리 정리
-      window.addEventListener("beforeunload", () => {
-        if (webcam.srcObject) {
-          webcam.srcObject.getTracks().forEach(track => track.stop());
-        }
-      });
-
-      window.addEventListener("load", init);
-      window.addEventListener("resize", updateDetectionZone);
-    </script>
-  </body>
-</html>
