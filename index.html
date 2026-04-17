@@ -205,6 +205,22 @@
         left: 0;
       }
 
+      #debug {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.85);
+        color: #0ff;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 11px;
+        z-index: 1000;
+        max-width: 300px;
+        border: 2px solid #333;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
       @media (max-width: 768px) {
         #webcam-container {
           width: 320px;
@@ -270,6 +286,11 @@
       </ul>
     </div>
 
+    <div id="debug">
+      <div style="color: #0f0; margin-bottom: 5px;">🔍 디버그 로그</div>
+      <div id="debug-info">초기화 중...</div>
+    </div>
+
     <div id="loading">
       <div>🎥 시스템 초기화 중...</div>
       <div id="loading-status">준비 중...</div>
@@ -287,6 +308,7 @@
       const loadingEl = document.getElementById("loading");
       const loadingStatusEl = document.getElementById("loading-status");
       const gestureGuide = document.getElementById("gesture-guide");
+      const debugInfo = document.getElementById("debug-info");
 
       const handStatusEl = document.getElementById("hand-status");
       const gestureStatusEl = document.getElementById("gesture-status");
@@ -299,8 +321,8 @@
       // 상수
       const PINCH_THRESHOLD = 0.05;  // 손가락 모은 상태 임계값
       const OPEN_THRESHOLD = 0.15;   // 손가락 벌린 상태 임계값
-      const PLAYBACK_SPEED = 0.033;  // 재생 속도 (초/프레임)
-      const REWIND_SPEED = 0.033;    // 되감기 속도 (초/프레임)
+      const PLAYBACK_SPEED = 0.05;   // 재생 속도 (초/프레임) - 증가
+      const REWIND_SPEED = 0.05;     // 되감기 속도 (초/프레임) - 증가
 
       // 상태
       let isProcessing = false;
@@ -314,6 +336,14 @@
       let isPlaying = false;
       let isRewinding = false;
       let currentTime = 0;
+      let videoDuration = 0;
+
+      // 디버그 로그
+      function log(message) {
+        console.log(message);
+        const timestamp = new Date().toLocaleTimeString();
+        debugInfo.innerHTML = `[${timestamp}] ${message}<br>` + debugInfo.innerHTML.split('<br>').slice(0, 8).join('<br>');
+      }
 
       // MediaPipe Hands 설정
       const hands = new Hands({
@@ -325,8 +355,8 @@
       hands.setOptions({
         maxNumHands: 1,
         modelComplexity: 0,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6,
       });
 
       hands.onResults(onResults);
@@ -334,12 +364,12 @@
       // 웹캠 초기화
       async function initCamera() {
         try {
-          console.log("📷 카메라 초기화 시작");
+          log("📷 카메라 초기화 시작");
           loadingStatusEl.textContent = "카메라 권한 요청 중...";
 
           const devices = await navigator.mediaDevices.enumerateDevices();
           const videoDevices = devices.filter(device => device.kind === 'videoinput');
-          console.log(`📹 발견된 카메라: ${videoDevices.length}개`);
+          log(`📹 발견된 카메라: ${videoDevices.length}개`);
 
           if (videoDevices.length === 0) {
             throw new Error("카메라를 찾을 수 없습니다.");
@@ -359,7 +389,7 @@
           loadingStatusEl.textContent = "카메라 스트림 요청 중...";
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
           
-          console.log("✅ 카메라 스트림 획득");
+          log("✅ 카메라 스트림 획득");
           loadingStatusEl.textContent = "카메라 설정 중...";
 
           webcam.srcObject = stream;
@@ -376,7 +406,7 @@
                 canvas.width = 640;
                 canvas.height = 360;
                 
-                console.log(`✅ 카메라 준비 완료: ${canvas.width}x${canvas.height}`);
+                log(`✅ 카메라 준비 완료: ${canvas.width}x${canvas.height}`);
                 loadingStatusEl.textContent = "카메라 준비 완료";
                 
                 cameraReady = true;
@@ -393,6 +423,7 @@
             };
           });
         } catch (err) {
+          log("❌ 카메라 오류: " + err.message);
           console.error("카메라 오류:", err);
           
           if (err.name === 'NotAllowedError') {
@@ -448,10 +479,16 @@
           distanceEl.textContent = currentDistance.toFixed(3);
 
           // 제스처 판단
+          const wasPlaying = isPlaying;
+          const wasRewinding = isRewinding;
+
           if (currentDistance < PINCH_THRESHOLD) {
             // 손가락 모음 → 되감기
             isPlaying = false;
             isRewinding = true;
+            if (!wasRewinding) {
+              log("⏪ 되감기 시작");
+            }
             gestureStatusEl.textContent = "⏪ 되감기";
             gestureStatusEl.className = "value rewinding";
             gestureGuide.textContent = "⏪ 되감는 중...";
@@ -461,6 +498,9 @@
             // 손가락 벌림 → 재생
             isPlaying = true;
             isRewinding = false;
+            if (!wasPlaying) {
+              log("▶️ 재생 시작");
+            }
             gestureStatusEl.textContent = "▶️ 재생";
             gestureStatusEl.className = "value playing";
             gestureGuide.textContent = "▶️ 재생 중...";
@@ -468,6 +508,9 @@
             gestureGuide.style.color = "#00ff00";
           } else {
             // 중간 상태 → 일시정지
+            if (wasPlaying || wasRewinding) {
+              log("⏸️ 일시정지");
+            }
             isPlaying = false;
             isRewinding = false;
             gestureStatusEl.textContent = "⏸️ 일시정지";
@@ -500,7 +543,7 @@
           canvasCtx.moveTo(thumbTip.x * canvas.width, thumbTip.y * canvas.height);
           canvasCtx.lineTo(indexTip.x * canvas.width, indexTip.y * canvas.height);
           canvasCtx.strokeStyle = handColor;
-          canvasCtx.lineWidth = 3;
+          canvasCtx.lineWidth = 4;
           canvasCtx.stroke();
 
           // 엄지 강조
@@ -508,7 +551,7 @@
           canvasCtx.arc(
             thumbTip.x * canvas.width,
             thumbTip.y * canvas.height,
-            8,
+            10,
             0,
             2 * Math.PI
           );
@@ -523,7 +566,7 @@
           canvasCtx.arc(
             indexTip.x * canvas.width,
             indexTip.y * canvas.height,
-            8,
+            10,
             0,
             2 * Math.PI
           );
@@ -537,6 +580,9 @@
           handStatusEl.style.color = "#0f0";
         } else {
           // 손 없음
+          if (isPlaying || isRewinding) {
+            log("👋 손 감지 중단");
+          }
           isPlaying = false;
           isRewinding = false;
           handStatusEl.textContent = "❌ 없음";
@@ -554,7 +600,7 @@
 
       // 프레임 처리
       let lastProcessTime = 0;
-      const PROCESS_INTERVAL = 33;
+      const PROCESS_INTERVAL = 33; // ~30fps
 
       async function processFrame() {
         if (!cameraReady || !handsReady) {
@@ -573,20 +619,30 @@
             await hands.send({ image: webcam });
           } catch (err) {
             console.error("프레임 처리 오류:", err);
+            log("⚠️ 프레임 처리 오류");
             isProcessing = false;
           }
         }
         requestAnimationFrame(processFrame);
       }
 
-      // 비디오 업데이트
+      // 비디오 업데이트 (최적화)
+      let lastVideoUpdateTime = 0;
+      const VIDEO_UPDATE_INTERVAL = 16; // ~60fps
+
       function updateVideo() {
-        if (video.duration && !isNaN(video.duration)) {
+        const now = Date.now();
+        
+        if (videoDuration > 0 && now - lastVideoUpdateTime >= VIDEO_UPDATE_INTERVAL) {
+          lastVideoUpdateTime = now;
+
           // 재생
           if (isPlaying) {
             currentTime += PLAYBACK_SPEED;
-            if (currentTime > video.duration) {
-              currentTime = video.duration;
+            if (currentTime > videoDuration) {
+              currentTime = videoDuration;
+              isPlaying = false;
+              log("⏹️ 영상 끝 도달");
             }
             videoStateEl.textContent = "▶️ 재생 중";
             videoStateEl.className = "value playing";
@@ -596,6 +652,8 @@
             currentTime -= REWIND_SPEED;
             if (currentTime < 0) {
               currentTime = 0;
+              isRewinding = false;
+              log("⏹️ 영상 시작 도달");
             }
             videoStateEl.textContent = "⏪ 되감기 중";
             videoStateEl.className = "value rewinding";
@@ -606,13 +664,15 @@
             videoStateEl.className = "value";
           }
 
-          // 비디오 시간 업데이트
-          video.currentTime = currentTime;
+          // 비디오 시간 업데이트 (직접 설정)
+          if (Math.abs(video.currentTime - currentTime) > 0.1) {
+            video.currentTime = currentTime;
+          }
 
           // UI 업데이트
-          positionEl.textContent = `${currentTime.toFixed(1)}초 / ${video.duration.toFixed(1)}초`;
+          positionEl.textContent = `${currentTime.toFixed(1)}초 / ${videoDuration.toFixed(1)}초`;
           
-          const progress = (currentTime / video.duration) * 100;
+          const progress = (currentTime / videoDuration) * 100;
           progressFill.style.width = `${progress}%`;
         }
 
@@ -622,17 +682,20 @@
       // 초기화
       async function init() {
         try {
-          console.log("🚀 초기화 시작");
+          log("🚀 초기화 시작");
           
           // 1. 비디오 로드
+          log("📹 비디오 로딩 중...");
           loadingStatusEl.textContent = "비디오 로딩 중...";
           video.load();
           
           await new Promise((resolve) => {
-            video.addEventListener('loadeddata', () => {
-              console.log("✅ 비디오 로드 완료");
-              loadingStatusEl.textContent = "비디오 로드 완료";
+            video.addEventListener('loadedmetadata', () => {
+              videoDuration = video.duration;
               currentTime = 0;
+              video.currentTime = 0;
+              log(`✅ 비디오 로드 완료 (${videoDuration.toFixed(1)}초)`);
+              loadingStatusEl.textContent = "비디오 로드 완료";
               resolve();
             }, { once: true });
           });
@@ -641,23 +704,26 @@
           await initCamera();
 
           // 3. MediaPipe Hands 준비
+          log("🤖 AI 모델 준비 중...");
           loadingStatusEl.textContent = "AI 모델 준비 중...";
           await new Promise(resolve => setTimeout(resolve, 1000));
           handsReady = true;
-          console.log("✅ AI 모델 준비 완료");
+          log("✅ AI 모델 준비 완료");
           loadingStatusEl.textContent = "준비 완료!";
 
           // 4. 로딩 화면 숨기기
           setTimeout(() => {
             loadingEl.style.display = "none";
+            log("✅ 모든 초기화 완료!");
           }, 500);
           
           // 5. 시작
           processFrame();
           updateVideo();
           
-          console.log("✅ 모든 초기화 완료!");
+          console.log("✅ 시스템 준비 완료!");
         } catch (err) {
+          log("❌ 초기화 실패: " + err.message);
           console.error("초기화 실패:", err);
           loadingEl.innerHTML = `
             <div>❌ 초기화 실패</div>
@@ -668,8 +734,17 @@
       }
 
       // 비디오 자동 재생 방지
-      video.addEventListener("play", () => {
-        video.pause();
+      video.addEventListener("play", (e) => {
+        if (!isPlaying) {
+          video.pause();
+        }
+      });
+
+      // 비디오 시간 동기화
+      video.addEventListener("timeupdate", () => {
+        if (!isPlaying && !isRewinding) {
+          currentTime = video.currentTime;
+        }
       });
 
       // 메모리 정리
