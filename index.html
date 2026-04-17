@@ -17,26 +17,32 @@
         font-family: Arial, sans-serif;
       }
 
-      #video {
+      #main-container {
         position: fixed;
         top: 0;
         left: 0;
         width: 100vw;
         height: 100vh;
+        display: flex;
+      }
+
+      #video-section {
+        flex: 1;
+        position: relative;
+        background: #000;
+      }
+
+      #video {
+        width: 100%;
+        height: 100%;
         object-fit: cover;
       }
 
-      #webcam-container {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        width: 200px;
-        height: 150px;
-        border: 2px solid rgba(255, 255, 255, 0.5);
-        border-radius: 8px;
-        overflow: hidden;
-        background: #000;
-        z-index: 1000;
+      #webcam-section {
+        width: 400px;
+        position: relative;
+        background: #1a1a1a;
+        border-left: 3px solid #333;
       }
 
       #webcam {
@@ -49,17 +55,32 @@
         transform: scaleX(-1);
       }
 
+      #detection-zone {
+        position: absolute;
+        border: 3px dashed #00ff00;
+        background: rgba(0, 255, 0, 0.1);
+        pointer-events: none;
+        z-index: 10;
+        border-radius: 10px;
+      }
+
+      #detection-zone.active {
+        background: rgba(0, 255, 0, 0.2);
+        border-color: #00ff00;
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+      }
+
       #status {
         position: fixed;
         top: 20px;
         left: 20px;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.8);
         color: white;
         padding: 15px 20px;
         border-radius: 8px;
         font-size: 14px;
         z-index: 1000;
-        max-width: 300px;
+        max-width: 350px;
       }
 
       #status div {
@@ -81,27 +102,62 @@
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.8);
+        background: rgba(0, 0, 0, 0.9);
         color: white;
         padding: 20px 40px;
         border-radius: 8px;
         font-size: 16px;
         z-index: 2000;
       }
+
+      #zone-info {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        color: #0f0;
+        padding: 8px 15px;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 100;
+      }
+
+      @media (max-width: 768px) {
+        #main-container {
+          flex-direction: column;
+        }
+        #webcam-section {
+          width: 100%;
+          height: 300px;
+          border-left: none;
+          border-top: 3px solid #333;
+        }
+      }
     </style>
   </head>
   <body>
-    <video id="video" src="01.mp4"></video>
+    <div id="main-container">
+      <div id="video-section">
+        <video id="video" src="01.mp4"></video>
+      </div>
 
-    <div id="webcam-container">
-      <video id="webcam" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
+      <div id="webcam-section">
+        <div id="zone-info">✋ 이 영역에 손을 펼치세요</div>
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div id="detection-zone"></div>
+      </div>
     </div>
 
     <div id="status">
       <div>
         <span class="label">손 감지:</span>
         <span class="value" id="hand-status">아니오</span>
+      </div>
+      <div>
+        <span class="label">영역 내 위치:</span>
+        <span class="value" id="in-zone">아니오</span>
       </div>
       <div>
         <span class="label">손 펼침 정도:</span>
@@ -125,8 +181,10 @@
       const canvas = document.getElementById("canvas");
       const canvasCtx = canvas.getContext("2d");
       const loadingEl = document.getElementById("loading");
+      const detectionZone = document.getElementById("detection-zone");
 
       const handStatusEl = document.getElementById("hand-status");
+      const inZoneEl = document.getElementById("in-zone");
       const opennessEl = document.getElementById("openness");
       const positionEl = document.getElementById("position");
 
@@ -135,11 +193,19 @@
       const MAX_RATIO = 2.2;
       const LERP_FACTOR = 0.12;
 
+      // 감지 영역 설정 (캔버스 기준 비율)
+      const ZONE = {
+        x: 0.15,      // 좌측 15%
+        y: 0.15,      // 상단 15%
+        width: 0.7,   // 너비 70%
+        height: 0.7   // 높이 70%
+      };
+
       // 상태
       let currentSeekRatio = 0;
       let targetSeekRatio = 0;
-      let lastHandDetected = false;
       let isProcessing = false;
+      let isHandInZone = false;
 
       // MediaPipe Hands 설정
       const hands = new Hands({
@@ -157,7 +223,7 @@
 
       hands.onResults(onResults);
 
-      // 웹캠 설정 (맥북 최적화)
+      // 웹캠 설정
       async function initCamera() {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
@@ -177,6 +243,10 @@
               webcam.play();
               canvas.width = webcam.videoWidth;
               canvas.height = webcam.videoHeight;
+              
+              // 감지 영역 표시
+              updateDetectionZone();
+              
               console.log(`카메라 해상도: ${canvas.width}x${canvas.height}`);
               resolve();
             };
@@ -188,6 +258,37 @@
         }
       }
 
+      // 감지 영역 표시 업데이트
+      function updateDetectionZone() {
+        const webcamSection = document.getElementById("webcam-section");
+        const rect = webcamSection.getBoundingClientRect();
+        
+        detectionZone.style.left = `${ZONE.x * 100}%`;
+        detectionZone.style.top = `${ZONE.y * 100}%`;
+        detectionZone.style.width = `${ZONE.width * 100}%`;
+        detectionZone.style.height = `${ZONE.height * 100}%`;
+      }
+
+      // 손이 감지 영역 안에 있는지 확인
+      function isHandInDetectionZone(landmarks) {
+        // 손바닥 중심 (손목, 중지 뿌리, 새끼 뿌리의 평균)
+        const wrist = landmarks[0];
+        const middleMCP = landmarks[9];
+        const pinkyMCP = landmarks[17];
+        
+        const centerX = (wrist.x + middleMCP.x + pinkyMCP.x) / 3;
+        const centerY = (wrist.y + middleMCP.y + pinkyMCP.y) / 3;
+
+        // 영역 내에 있는지 확인
+        const inZone = 
+          centerX >= ZONE.x && 
+          centerX <= (ZONE.x + ZONE.width) &&
+          centerY >= ZONE.y && 
+          centerY <= (ZONE.y + ZONE.height);
+
+        return inZone;
+      }
+
       function onResults(results) {
         // 캔버스 초기화
         canvasCtx.save();
@@ -196,36 +297,64 @@
         // 웹캠 영상 그리기
         canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
+        // 감지 영역 그리기
+        canvasCtx.strokeStyle = "#00ff00";
+        canvasCtx.lineWidth = 3;
+        canvasCtx.setLineDash([10, 5]);
+        canvasCtx.strokeRect(
+          ZONE.x * canvas.width,
+          ZONE.y * canvas.height,
+          ZONE.width * canvas.width,
+          ZONE.height * canvas.height
+        );
+        canvasCtx.setLineDash([]);
+
         if (
           results.multiHandLandmarks &&
           results.multiHandLandmarks.length > 0
         ) {
           const landmarks = results.multiHandLandmarks[0];
 
+          // 손이 영역 안에 있는지 확인
+          isHandInZone = isHandInDetectionZone(landmarks);
+
           // 손 랜드마크 그리기
           drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
-            color: "#00FF00",
+            color: isHandInZone ? "#00FF00" : "#FF6600",
             lineWidth: 2,
           });
           drawLandmarks(canvasCtx, landmarks, {
-            color: "#FF0000",
+            color: isHandInZone ? "#FF0000" : "#FFAA00",
             lineWidth: 1,
             radius: 3,
           });
 
-          // 손 펼침 정도 계산
-          const openness = calculateHandOpenness(landmarks);
-          targetSeekRatio = openness;
-          lastHandDetected = true;
-
           // UI 업데이트
           handStatusEl.textContent = "예";
           handStatusEl.style.color = "#0f0";
-          opennessEl.textContent = openness.toFixed(2);
+
+          if (isHandInZone) {
+            // 영역 안에 있을 때만 손 펼침 정도 계산
+            const openness = calculateHandOpenness(landmarks);
+            targetSeekRatio = openness;
+            
+            inZoneEl.textContent = "예 ✓";
+            inZoneEl.style.color = "#0f0";
+            opennessEl.textContent = openness.toFixed(2);
+            
+            detectionZone.classList.add("active");
+          } else {
+            inZoneEl.textContent = "아니오";
+            inZoneEl.style.color = "#ff6600";
+            detectionZone.classList.remove("active");
+          }
         } else {
-          lastHandDetected = false;
+          isHandInZone = false;
           handStatusEl.textContent = "아니오";
           handStatusEl.style.color = "#f00";
+          inZoneEl.textContent = "아니오";
+          inZoneEl.style.color = "#f00";
+          detectionZone.classList.remove("active");
         }
 
         canvasCtx.restore();
@@ -233,7 +362,6 @@
       }
 
       function calculateHandOpenness(landmarks) {
-        // 랜드마크 인덱스
         const WRIST = 0;
         const INDEX_TIP = 8;
         const MIDDLE_TIP = 12;
@@ -248,7 +376,6 @@
         const ringTip = landmarks[RING_TIP];
         const pinkyTip = landmarks[PINKY_TIP];
 
-        // 거리 계산 함수
         function distance(p1, p2) {
           const dx = p1.x - p2.x;
           const dy = p1.y - p2.y;
@@ -256,10 +383,7 @@
           return Math.sqrt(dx * dx + dy * dy + dz * dz);
         }
 
-        // 손바닥 크기: 손목에서 중지 MCP까지
         const palmSize = distance(wrist, middleMCP);
-
-        // 손가락 끝에서 손목까지의 평균 거리
         const avgDistance =
           (distance(indexTip, wrist) +
             distance(middleTip, wrist) +
@@ -267,10 +391,7 @@
             distance(pinkyTip, wrist)) /
           4;
 
-        // 비율 계산
         const ratio = avgDistance / palmSize;
-
-        // 0-1 범위로 정규화
         const normalized = (ratio - MIN_RATIO) / (MAX_RATIO - MIN_RATIO);
         const clamped = Math.max(0, Math.min(1, normalized));
 
@@ -290,17 +411,16 @@
         requestAnimationFrame(processFrame);
       }
 
-      // 비디오 컨트롤 루프
       function updateVideo() {
-        // 현재 비율을 목표 비율로 부드럽게 이동
-        currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
+        // 영역 안에 손이 있을 때만 부드럽게 이동
+        if (isHandInZone) {
+          currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
+        }
 
-        // 비디오 탐색
         if (video.duration && !isNaN(video.duration)) {
           const targetTime = currentSeekRatio * video.duration;
           video.currentTime = targetTime;
 
-          // 위치 표시 업데이트
           positionEl.textContent = `${targetTime.toFixed(
             1
           )}초 / ${video.duration.toFixed(1)}초`;
@@ -309,18 +429,11 @@
         requestAnimationFrame(updateVideo);
       }
 
-      // 초기화
       async function init() {
         try {
-          // 카메라 초기화
           await initCamera();
-          
-          // 로딩 메시지 제거
           loadingEl.style.display = "none";
-          
-          // 프레임 처리 시작
           processFrame();
-          
           console.log("초기화 완료");
         } catch (err) {
           loadingEl.textContent = "초기화 실패: " + err.message;
@@ -328,18 +441,16 @@
         }
       }
 
-      // 비디오 메타데이터 로드 시 컨트롤 루프 시작
       video.addEventListener("loadedmetadata", () => {
         updateVideo();
       });
 
-      // 비디오가 일시정지 상태 유지되도록 보장
       video.addEventListener("play", () => {
         video.pause();
       });
 
-      // 페이지 로드 시 초기화
       window.addEventListener("load", init);
+      window.addEventListener("resize", updateDetectionZone);
     </script>
   </body>
 </html>
