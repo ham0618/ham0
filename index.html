@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>손 제스처 비디오 컨트롤</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        overflow: hidden;
+        background: #000;
+        font-family: Arial, sans-serif;
+      }
+
+      #video {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+      }
+
+      #webcam-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 200px;
+        height: 150px;
+        border: 2px solid rgba(255, 255, 255, 0.5);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #000;
+        z-index: 1000;
+      }
+
+      #webcam {
+        display: none;
+      }
+
+      #canvas {
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+      }
+
+      #status {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        font-size: 14px;
+        z-index: 1000;
+        max-width: 300px;
+      }
+
+      #status div {
+        margin: 5px 0;
+      }
+
+      .label {
+        color: #aaa;
+        font-size: 12px;
+      }
+
+      .value {
+        color: #0f0;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="video" src="01.mp4"></video>
+
+    <div id="webcam-container">
+      <video id="webcam" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="status">
+      <div>
+        <span class="label">손 감지:</span>
+        <span class="value" id="hand-status">아니오</span>
+      </div>
+      <div>
+        <span class="label">손 펼침 정도:</span>
+        <span class="value" id="openness">0.00</span>
+      </div>
+      <div>
+        <span class="label">비디오 위치:</span>
+        <span class="value" id="position">0.0초</span>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script>
+      const video = document.getElementById("video");
+      const webcam = document.getElementById("webcam");
+      const canvas = document.getElementById("canvas");
+      const canvasCtx = canvas.getContext("2d");
+
+      const handStatusEl = document.getElementById("hand-status");
+      const opennessEl = document.getElementById("openness");
+      const positionEl = document.getElementById("position");
+
+      // 상수
+      const MIN_RATIO = 1.0;
+      const MAX_RATIO = 2.2;
+      const LERP_FACTOR = 0.12;
+
+      // 상태
+      let currentSeekRatio = 0;
+      let targetSeekRatio = 0;
+      let lastHandDetected = false;
+
+      // MediaPipe Hands 설정
+      const hands = new Hands({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        },
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      hands.onResults(onResults);
+
+      // 웹캠 설정
+      navigator.mediaDevices
+        .getUserMedia({
+          video: {
+            width: 640,
+            height: 480,
+          },
+        })
+        .then((stream) => {
+          webcam.srcObject = stream;
+          webcam.addEventListener("loadeddata", () => {
+            canvas.width = webcam.videoWidth;
+            canvas.height = webcam.videoHeight;
+            processFrame();
+          });
+        })
+        .catch((err) => {
+          console.error("웹캠 오류:", err);
+          alert("웹캠에 접근할 수 없습니다. 카메라 권한을 허용해주세요.");
+        });
+
+      function onResults(results) {
+        // 캔버스 초기화
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 웹캠 영상 그리기
+        canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+        if (
+          results.multiHandLandmarks &&
+          results.multiHandLandmarks.length > 0
+        ) {
+          const landmarks = results.multiHandLandmarks[0];
+
+          // 손 랜드마크 그리기
+          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+            color: "#00FF00",
+            lineWidth: 2,
+          });
+          drawLandmarks(canvasCtx, landmarks, {
+            color: "#FF0000",
+            lineWidth: 1,
+            radius: 3,
+          });
+
+          // 손 펼침 정도 계산
+          const openness = calculateHandOpenness(landmarks);
+          targetSeekRatio = openness;
+          lastHandDetected = true;
+
+          // UI 업데이트
+          handStatusEl.textContent = "예";
+          handStatusEl.style.color = "#0f0";
+          opennessEl.textContent = openness.toFixed(2);
+        } else {
+          lastHandDetected = false;
+          handStatusEl.textContent = "아니오";
+          handStatusEl.style.color = "#f00";
+        }
+
+        canvasCtx.restore();
+      }
+
+      function calculateHandOpenness(landmarks) {
+        // 랜드마크 인덱스
+        const WRIST = 0;
+        const INDEX_TIP = 8;
+        const MIDDLE_TIP = 12;
+        const MIDDLE_MCP = 9;
+        const RING_TIP = 16;
+        const PINKY_TIP = 20;
+
+        const wrist = landmarks[WRIST];
+        const indexTip = landmarks[INDEX_TIP];
+        const middleTip = landmarks[MIDDLE_TIP];
+        const middleMCP = landmarks[MIDDLE_MCP];
+        const ringTip = landmarks[RING_TIP];
+        const pinkyTip = landmarks[PINKY_TIP];
+
+        // 거리 계산 함수
+        function distance(p1, p2) {
+          const dx = p1.x - p2.x;
+          const dy = p1.y - p2.y;
+          const dz = (p1.z || 0) - (p2.z || 0);
+          return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        // 손바닥 크기: 손목에서 중지 MCP까지
+        const palmSize = distance(wrist, middleMCP);
+
+        // 손가락 끝에서 손목까지의 평균 거리
+        const avgDistance =
+          (distance(indexTip, wrist) +
+            distance(middleTip, wrist) +
+            distance(ringTip, wrist) +
+            distance(pinkyTip, wrist)) /
+          4;
+
+        // 비율 계산
+        const ratio = avgDistance / palmSize;
+
+        // 0-1 범위로 정규화
+        const normalized = (ratio - MIN_RATIO) / (MAX_RATIO - MIN_RATIO);
+        const clamped = Math.max(0, Math.min(1, normalized));
+
+        return clamped;
+      }
+
+      async function processFrame() {
+        if (webcam.readyState === webcam.HAVE_ENOUGH_DATA) {
+          await hands.send({ image: webcam });
+        }
+        requestAnimationFrame(processFrame);
+      }
+
+      // 비디오 컨트롤 루프
+      function updateVideo() {
+        // 현재 비율을 목표 비율로 부드럽게 이동
+        currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
+
+        // 비디오 탐색
+        if (video.duration && !isNaN(video.duration)) {
+          const targetTime = currentSeekRatio * video.duration;
+          video.currentTime = targetTime;
+
+          // 위치 표시 업데이트
+          positionEl.textContent = `${targetTime.toFixed(
+            1
+          )}초 / ${video.duration.toFixed(1)}초`;
+        }
+
+        requestAnimationFrame(updateVideo);
+      }
+
+      // 비디오 메타데이터 로드 시 컨트롤 루프 시작
+      video.addEventListener("loadedmetadata", () => {
+        updateVideo();
+      });
+
+      // 비디오가 일시정지 상태 유지되도록 보장
+      video.addEventListener("play", () => {
+        video.pause();
+      });
+    </script>
+  </body>
+</html>
