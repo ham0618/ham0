@@ -2,78 +2,46 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pink Tour | Ultimate Gesture Control Pro</title>
-    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pink Tour | Gesture Reviewer</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: 'Pretendard', sans-serif; }
-        body { overflow: hidden; background: #000; color: #fff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            overflow: hidden; background: #000; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            cursor: pointer; /* 클릭 유도 */
+        }
 
-        /* 메인 비디오 전력 질주 */
+        /* 메인 비디오: 전체 화면 */
         #video {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
             object-fit: cover; z-index: 1;
         }
 
-        /* [PC 전용] 카메라 화면 복원 (처음처럼 크게) */
+        /* 웹캠: 좌측 하단 (PC에서 크게 유지) */
         #webcam-container {
             position: fixed; bottom: 30px; left: 30px; 
-            width: 360px; height: 270px; /* 4:3 비율로 변경하여 손이 더 잘 보이게 */
+            width: 400px; height: 300px; 
             background: #000; border: 3px solid #0f0; border-radius: 16px;
-            overflow: hidden; z-index: 100; box-shadow: 0 10px 40px rgba(0,255,0,0.2);
-            transition: all 0.3s ease;
+            overflow: hidden; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
         }
         #webcam { display: none; }
         #canvas { width: 100%; height: 100%; transform: scaleX(-1); display: block; }
 
-        /* [모바일 전용] 미니멀 가이드 */
-        #mobile-status {
+        /* 상태 가이드: 심플하게 상단 중앙 */
+        #status-guide {
             position: fixed; top: 30px; left: 50%; transform: translateX(-50%);
-            z-index: 1000; color: #0f0; font-weight: bold; font-size: 14px;
-            pointer-events: none; background: rgba(0,0,0,0.6); padding: 7px 18px; border-radius: 20px;
-            display: none; letter-spacing: 1px;
+            z-index: 1000; color: #0f0; font-weight: bold; font-size: 16px;
+            background: rgba(0,0,0,0.7); padding: 10px 25px; border-radius: 30px;
+            border: 1px solid #333; pointer-events: none;
+            letter-spacing: 1px;
         }
 
-        /* [PC 전용] 상태 정보창 (좌측 상단) */
-        #pc-status {
-            position: fixed; top: 20px; left: 20px; z-index: 1000;
-            background: rgba(0, 0, 0, 0.85); padding: 20px; border-radius: 16px;
-            border: 1px solid #333; min-width: 250px; backdrop-filter: blur(10px);
-        }
-        .label { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
-        .value { color: #0f0; font-weight: bold; font-family: 'JetBrains Mono', monospace; font-size: 18px; margin-bottom: 10px; }
-        .progress-bar { width: 100%; height: 6px; background: #222; margin-top: 5px; border-radius: 3px; overflow: hidden; }
-        #fill { height: 100%; background: linear-gradient(90deg, #0f0, #008000); width: 0%; transition: width 0.1s linear; }
-
-        /* [PC 전용] 사용 방법 (우측 상단) */
-        #pc-guide {
-            position: fixed; top: 20px; right: 20px; z-index: 1000;
-            background: rgba(0,0,0,0.8); padding: 15px; border-radius: 12px; border: 1px solid #333; font-size: 12px; color: #ccc;
-            max-width: 200px;
-        }
-        #pc-guide p { margin-bottom: 5px; }
-        #pc-guide span { color: #0f0; font-weight: bold; }
-
-        /* 초기 진입 오버레이 */
-        #overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.95);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 2000; cursor: pointer;
-        }
-        #start-btn {
-            padding: 18px 50px; border: 2px solid #0f0; color: #0f0;
-            background: transparent; font-size: 20px; font-weight: bold;
-            border-radius: 40px; margin-top: 30px; letter-spacing: 2px;
-        }
-
-        /* 📱 모바일 반응형 터치 */
-        @media (max-width: 768px) {
-            #pc-status, #pc-guide { display: none !important; }
-            #mobile-status { display: block; }
-            #webcam-container {
-                width: 120px; height: 90px; bottom: 15px; left: auto; right: 15px;
-                border-width: 2px; border-radius: 10px;
-            }
+        /* 최초 안내 (클릭하면 사라짐) */
+        #init-msg {
+            position: fixed; inset: 0; z-index: 2000;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.8); color: #0f0; font-size: 20px; font-weight: bold;
         }
     </style>
 </head>
@@ -81,35 +49,8 @@
 
 <video id="video" src="01.mp4" preload="auto" muted playsinline></video>
 
-<div id="overlay">
-    <div style="font-size: 32px; font-weight: 900; color: #0f0; letter-spacing: -1px;">PINK TOUR JOG-SHUTTLE</div>
-    <div style="margin-top: 10px; font-size: 14px; color: #aaa; text-align: center; line-height: 1.6;">
-        엄지, 검지를 <span style="color:#0f0">벌리면 재생 (가속)</span><br>
-        엄지, 검지를 <span style="color:#f90">모으면 되감기 (초가속)</span>
-    </div>
-    <button id="start-btn">엔진 시동</button>
-</div>
-
-<div id="mobile-status">준비됨</div>
-
-<div id="pc-status">
-    <div style="font-size: 14px; font-weight: 800; color: #0f0; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 5px;">G-PLAYER PRO</div>
-    <div>
-        <p class="label">Gesture Mode</p>
-        <p id="g-stat" class="value" style="color: #fff;">READY</p>
-    </div>
-    <div>
-        <p class="label">Playback Speed</p>
-        <p id="s-stat" class="value">0.0x</p>
-    </div>
-    <div class="progress-bar"><div id="fill"></div></div>
-</div>
-
-<div id="pc-guide">
-    <p><span>벌리기:</span> 정방향 (0.5x ~ 2.5x)</p>
-    <p><span>모으기:</span> 역방향 (초가속 -1x ~ -4.0x)</p>
-    <p><span>중 간:</span> 일시정지</p>
-</div>
+<div id="init-msg">화면을 클릭하면 시동합니다.</div>
+<div id="status-guide">READY</div>
 
 <div id="webcam-container">
     <video id="webcam" playsinline></video>
@@ -125,94 +66,76 @@
     const webcam = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const fill = document.getElementById('fill');
+    const guide = document.getElementById('status-guide');
+    const initMsg = document.getElementById('init-msg');
     
-    // --- [중요] 제스처 감도 최적화 (맥북 레티나 사양 맞춤) ---
-    // 중립 구간을 설정하여 정지 상태 유지를 쉽게 함
-    const NEUTRAL_START = 0.08; 
-    const NEUTRAL_END = 0.13;
-    const SMOOTHING = 0.2; // 맥북의 성능을 믿고 필터링을 낮춰 반응성 상향
+    // --- 설정값 (1배속 고정 최적화) ---
+    const PINCH_VAL = 0.06;   // 이 값보다 작으면 역재생
+    const OPEN_VAL = 0.12;    // 이 값보다 크면 정재생
+    const SMOOTHING = 0.3;    // 손떨림 방지 필터
     
-    let smoothedDist = 0.1; // 초기값은 중립 구간 내부
-    let targetRate = 0;
+    let smoothedDist = 0.1;
+    let targetMode = 0; // -1: 역재생, 0: 정지, 1: 정재생
     let lastTime = performance.now();
-    let isInitialized = false;
+    let isStarted = false;
 
-    // 맥북 성능 활용: complexity 1로 정확도 상향
     const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
 
     hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1, // M1/M2 맥북 이상에선 아주 잘 돌아갑니다.
-        minDetectionConfidence: 0.75,
-        minTrackingConfidence: 0.75
+        modelComplexity: 1, // 맥북 사양에 맞춰 정확도 높임
+        minDetectionConfidence: 0.8,
+        minTrackingConfidence: 0.8
     });
 
     hands.onResults(onResults);
 
-    // [핵심 로직] 비디오 조그 셔틀 엔진
+    // [핵심 루프] 비디오 제어
     function update() {
         const now = performance.now();
         const dt = (now - lastTime) / 1000;
         lastTime = now;
 
-        if (!isInitialized) return;
+        const isAtEnd = video.currentTime >= video.duration - 0.05;
+        const isAtStart = video.currentTime <= 0.05;
 
-        const isAtEnd = video.currentTime >= video.duration - 0.01;
-        const isAtStart = video.currentTime <= 0.01;
-
-        if (targetRate > 0) {
-            // 1. 재생 제스처 (최대 2.5배속으로 제한)
+        if (targetMode === 1) {
+            // 정방향: 딱 1배속 (너무 빠르지 않게)
             if (isAtEnd) {
                 video.pause();
-                video.currentTime = video.duration;
-                updateUI("FINISHED", "#ff4d4d", "0.0x");
+                guide.textContent = "FINISHED";
+                guide.style.color = "#f44";
             } else {
-                video.playbackRate = targetRate;
+                video.playbackRate = 1.0; 
                 if (video.paused) video.play().catch(()=>{});
-                updateUI("FORWARDING", "#0f0", targetRate.toFixed(1) + "x");
+                guide.textContent = "PLAYING (1.0x)";
+                guide.style.color = "#0f0";
             }
-        } else if (targetRate < 0) {
-            // 2. 되감기 제스처 (초가속 역재생 로직)
-            video.pause(); // 되감기는 수동 currentTime 조절이 가장 반응성이 좋습니다.
-            
+        } else if (targetMode === -1) {
+            // 역방향: 딱 1배속 (끊김 방지용 정속)
+            video.pause();
             if (isAtStart) {
                 video.currentTime = 0;
-                updateUI("START POINT", "#aaa", "0.0x");
+                guide.textContent = "START POINT";
+                guide.style.color = "#888";
             } else {
-                // targetRate가 음수이므로, 빼주는 형식으로 실시간 역재생 구현
-                // 맥북 사양에 맞춰 가속도(-4배속)를 엄청 높여 끊김을 '스킵' 느낌으로 처리
-                const rewindStep = targetRate * dt; 
-                video.currentTime += rewindStep; 
-                updateUI("REWINDING", "#ff9900", Math.abs(targetRate).toFixed(1) + "x");
+                // 수동으로 1초당 1초씩 뒤로 감 (1.0x 역재생)
+                video.currentTime -= dt; 
+                guide.textContent = "REWINDING (1.0x)";
+                guide.style.color = "#f90";
             }
         } else {
-            // 3. 중립 (PAUSE)
+            // 정지
             video.pause();
-            updateUI(isAtEnd ? "FINISHED" : "PAUSED", "#fff", "0.0x");
-        }
-
-        // 프로그레스 바
-        if (video.duration) {
-            fill.style.width = (video.currentTime / video.duration * 100) + "%";
+            guide.textContent = isAtEnd ? "FINISHED" : "PAUSED";
+            guide.style.color = "#fff";
         }
 
         requestAnimationFrame(update);
     }
 
-    // UI 통합 업데이트
-    function updateUI(status, color, speed) {
-        document.getElementById('mobile-status').textContent = status;
-        document.getElementById('mobile-status').style.color = color;
-        
-        document.getElementById('g-stat').textContent = status;
-        document.getElementById('g-stat').style.color = color;
-        document.getElementById('s-stat').textContent = speed;
-    }
-
-    // 거리 계산 및 속도 매핑
     function onResults(results) {
         ctx.save();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -222,64 +145,47 @@
             const lm = results.multiHandLandmarks[0];
             const dist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
 
-            // 필터링 적용
             smoothedDist = (dist * SMOOTHING) + (smoothedDist * (1 - SMOOTHING));
 
-            // [속도 매핑 로직 완벽 튜닝]
-            if (smoothedDist < NEUTRAL_START) {
-                // 역재생 구간 (0.08 미만)
-                // 0.08에서 꽉 쥔 상태(약 0.03)까지 비율 계산
-                const pinchRatio = (NEUTRAL_START - smoothedDist) / 0.05;
-                // 역재생은 초가속 튜닝: -1.0배속부터 최대 -4.0배속까지 기민하게
-                targetRate = -1.0 - (Math.min(pinchRatio, 1.0) * 3.0); 
-            } else if (smoothedDist > NEUTRAL_END) {
-                // 정재생 구간 (0.13 초과)
-                // 0.13에서 쫙 편 상태(약 0.28)까지 비율 계산
-                const openRatio = (smoothedDist - NEUTRAL_END) / 0.15;
-                // 정재생은 너무 빠르지 않게: 0.5배속부터 최대 2.5배속까지 묵직하게
-                targetRate = 0.5 + (Math.min(openRatio, 1.0) * 2.0);
+            // 모드 결정
+            if (smoothedDist < PINCH_VAL) {
+                targetMode = -1; // 모으면 역재생
+            } else if (smoothedDist > OPEN_VAL) {
+                targetMode = 1;  // 벌리면 정재생
             } else {
-                targetRate = 0; // 정지 구간 (0.08 ~ 0.13)
+                targetMode = 0;  // 중간은 정지
             }
 
-            // 웹캠 시각화 (깔끔한 녹색 선)
+            // 시각화
             drawConnectors(ctx, lm, HAND_CONNECTIONS, {color: '#0f0', lineWidth: 3});
-            [4, 8].forEach(i => {
-                ctx.beginPath();
-                ctx.arc(lm[i].x * canvas.width, lm[i].y * canvas.height, 6, 0, 2*Math.PI);
-                ctx.fillStyle = "#fff";
-                ctx.fill();
-            });
         } else {
-            targetRate = 0;
+            targetMode = 0;
         }
         ctx.restore();
     }
 
-    // 시스템 시동
-    document.getElementById('overlay').addEventListener('click', async () => {
-        if (isInitialized) return;
-        document.getElementById('start-btn').textContent = "엔진 예열 중...";
+    // 화면 클릭 시 시스템 시작
+    window.addEventListener('click', async () => {
+        if (isStarted) return;
+        
+        initMsg.textContent = "시동 중...";
         
         try {
-            // M1 맥북 이상에선 720p 30fps도 껌입니다.
             const camera = new Camera(webcam, {
                 onFrame: async () => { await hands.send({image: webcam}); },
                 width: 640, height: 480
             });
             await camera.start();
             
-            // 비디오 초기화
-            video.load();
-            video.play().then(() => video.pause());
+            video.play().then(() => video.pause()); // 비디오 잠금 해제
             
-            document.getElementById('overlay').style.display = 'none';
-            isInitialized = true;
-            update(); // 재생 루프 시작
+            initMsg.style.display = 'none';
+            isStarted = true;
+            update();
         } catch (err) {
-            alert("카메라 시동 실패: " + err + "\n브라우저의 카메라 권한을 확인해주세요.");
+            alert("카메라를 켤 수 없습니다. 권한을 확인해주세요.");
         }
-    });
+    }, { once: true });
 </script>
 </body>
 </html>
