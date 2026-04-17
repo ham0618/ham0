@@ -127,6 +127,21 @@
         font-size: 18px;
         z-index: 2000;
         border: 2px solid #333;
+        text-align: center;
+      }
+
+      #debug {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.85);
+        color: #0ff;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 12px;
+        z-index: 1000;
+        max-width: 300px;
+        border: 2px solid #333;
       }
 
       @media (max-width: 768px) {
@@ -172,7 +187,15 @@
       </div>
     </div>
 
-    <div id="loading">🎥 카메라 및 AI 모델 로딩 중...</div>
+    <div id="debug">
+      <div>🔍 디버그 정보</div>
+      <div id="debug-info">초기화 중...</div>
+    </div>
+
+    <div id="loading">
+      <div>🎥 카메라 및 AI 모델 로딩 중...</div>
+      <div id="loading-status" style="margin-top: 10px; font-size: 14px; color: #aaa;"></div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -184,7 +207,9 @@
       const canvas = document.getElementById("canvas");
       const canvasCtx = canvas.getContext("2d");
       const loadingEl = document.getElementById("loading");
+      const loadingStatusEl = document.getElementById("loading-status");
       const detectionZone = document.getElementById("detection-zone");
+      const debugInfo = document.getElementById("debug-info");
 
       const handStatusEl = document.getElementById("hand-status");
       const inZoneEl = document.getElementById("in-zone");
@@ -195,7 +220,7 @@
       // 상수
       const MIN_RATIO = 1.0;
       const MAX_RATIO = 2.2;
-      const LERP_FACTOR = 0.08; // 더 부드럽게
+      const LERP_FACTOR = 0.08;
 
       // 감지 영역 설정
       const ZONE = {
@@ -214,6 +239,14 @@
       let frameCount = 0;
       let fps = 0;
       let isSeeking = false;
+      let cameraReady = false;
+      let handsReady = false;
+
+      // 디버그 로그
+      function log(message) {
+        console.log(message);
+        debugInfo.innerHTML = message + '<br>' + debugInfo.innerHTML.split('<br>').slice(0, 5).join('<br>');
+      }
 
       // MediaPipe Hands 설정
       const hands = new Hands({
@@ -231,10 +264,22 @@
 
       hands.onResults(onResults);
 
-      // 웹캠 설정
+      // 웹캠 설정 (개선된 버전)
       async function initCamera() {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({
+          log("📷 카메라 권한 요청 중...");
+          loadingStatusEl.textContent = "카메라 권한 요청 중...";
+
+          // 먼저 권한 확인
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(device => device.kind === 'videoinput');
+          log(`📹 발견된 카메라: ${videoDevices.length}개`);
+
+          if (videoDevices.length === 0) {
+            throw new Error("카메라를 찾을 수 없습니다.");
+          }
+
+          const constraints = {
             video: {
               width: { ideal: 1280 },
               height: { ideal: 720 },
@@ -243,26 +288,65 @@
               frameRate: { ideal: 30 }
             },
             audio: false
-          });
+          };
+
+          log("🎥 카메라 스트림 요청 중...");
+          loadingStatusEl.textContent = "카메라 스트림 요청 중...";
+          
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          
+          log("✅ 카메라 스트림 획득 성공");
+          loadingStatusEl.textContent = "카메라 스트림 획득 성공";
 
           webcam.srcObject = stream;
           
-          return new Promise((resolve) => {
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error("카메라 로딩 타임아웃"));
+            }, 10000);
+
             webcam.onloadedmetadata = () => {
-              webcam.play();
+              clearTimeout(timeout);
+              log("📐 카메라 메타데이터 로드됨");
+              loadingStatusEl.textContent = "카메라 메타데이터 로드됨";
               
-              canvas.width = 640;
-              canvas.height = 360;
-              
-              updateDetectionZone();
-              
-              console.log(`카메라 해상도: ${canvas.width}x${canvas.height}`);
-              resolve();
+              webcam.play().then(() => {
+                log("▶️ 카메라 재생 시작");
+                loadingStatusEl.textContent = "카메라 재생 시작";
+                
+                // 캔버스 설정
+                canvas.width = 640;
+                canvas.height = 360;
+                
+                updateDetectionZone();
+                
+                log(`✅ 카메라 초기화 완료: ${canvas.width}x${canvas.height}`);
+                loadingStatusEl.textContent = "카메라 초기화 완료";
+                
+                cameraReady = true;
+                resolve();
+              }).catch(err => {
+                clearTimeout(timeout);
+                reject(new Error("카메라 재생 실패: " + err.message));
+              });
+            };
+
+            webcam.onerror = (err) => {
+              clearTimeout(timeout);
+              reject(new Error("카메라 오류: " + err.message));
             };
           });
         } catch (err) {
+          log("❌ 카메라 오류: " + err.message);
           console.error("웹캠 오류:", err);
-          alert("웹캠에 접근할 수 없습니다. 카메라 권한을 허용해주세요.");
+          
+          if (err.name === 'NotAllowedError') {
+            alert("카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요.");
+          } else if (err.name === 'NotFoundError') {
+            alert("카메라를 찾을 수 없습니다. 카메라가 연결되어 있는지 확인해주세요.");
+          } else {
+            alert("카메라 오류: " + err.message);
+          }
           throw err;
         }
       }
@@ -295,6 +379,8 @@
       }
 
       function onResults(results) {
+        if (!cameraReady) return;
+
         // FPS 계산
         frameCount++;
         const now = Date.now();
@@ -419,6 +505,11 @@
       const PROCESS_INTERVAL = 33;
 
       async function processFrame() {
+        if (!cameraReady || !handsReady) {
+          requestAnimationFrame(processFrame);
+          return;
+        }
+
         const now = Date.now();
         
         if (!isProcessing && 
@@ -430,13 +521,14 @@
             await hands.send({ image: webcam });
           } catch (err) {
             console.error("프레임 처리 오류:", err);
+            log("⚠️ 프레임 처리 오류: " + err.message);
             isProcessing = false;
           }
         }
         requestAnimationFrame(processFrame);
       }
 
-      // 비디오 업데이트 - 부드러운 시킹
+      // 비디오 업데이트
       function updateVideo() {
         if (isHandInZone) {
           currentSeekRatio += (targetSeekRatio - currentSeekRatio) * LERP_FACTOR;
@@ -445,7 +537,6 @@
         if (video.duration && !isNaN(video.duration) && !isSeeking) {
           const targetTime = currentSeekRatio * video.duration;
           
-          // 큰 차이가 있을 때만 시킹 (끊김 방지)
           if (Math.abs(video.currentTime - targetTime) > 0.05) {
             isSeeking = true;
             video.currentTime = targetTime;
@@ -457,25 +548,77 @@
         requestAnimationFrame(updateVideo);
       }
 
-      // 시킹 완료 이벤트
+      // 시킹 이벤트
       video.addEventListener('seeked', () => {
         isSeeking = false;
       });
 
-      // 시킹 중 이벤트
       video.addEventListener('seeking', () => {
         isSeeking = true;
       });
 
       async function init() {
         try {
-          // 비디오 완전히 로드
+          log("🚀 초기화 시작");
+          
+          // 1. 비디오 로드
+          log("📹 비디오 로딩 중...");
+          loadingStatusEl.textContent = "비디오 로딩 중...";
           video.load();
           
-          // 비디오 로드 대기
           await new Promise((resolve) => {
-            video.addEventListener('loadeddata', resolve, { once: true });
+            video.addEventListener('loadeddata', () => {
+              log("✅ 비디오 로드 완료");
+              loadingStatusEl.textContent = "비디오 로드 완료";
+              resolve();
+            }, { once: true });
           });
 
+          // 2. 카메라 초기화
           await initCamera();
+
+          // 3. MediaPipe Hands 준비 대기
+          log("🤖 AI 모델 준비 중...");
+          loadingStatusEl.textContent = "AI 모델 준비 중...";
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          handsReady = true;
+          
+          log("✅ AI 모델 준비 완료");
+          loadingStatusEl.textContent = "AI 모델 준비 완료";
+
+          // 4. 로딩 화면 숨기기
           loadingEl.style.display = "none";
+          
+          // 5. 프레임 처리 시작
+          processFrame();
+          updateVideo();
+          
+          log("✅ 모든 초기화 완료!");
+          console.log("✅ 초기화 완료");
+        } catch (err) {
+          log("❌ 초기화 실패: " + err.message);
+          loadingEl.innerHTML = `
+            <div>❌ 초기화 실패</div>
+            <div style="margin-top: 10px; font-size: 14px; color: #f00;">${err.message}</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #aaa;">페이지를 새로고침해주세요</div>
+          `;
+        }
+      }
+
+      video.addEventListener("play", () => {
+        video.pause();
+      });
+
+      // 메모리 정리
+      window.addEventListener("beforeunload", () => {
+        if (webcam.srcObject) {
+          webcam.srcObject.getTracks().forEach(track => track.stop());
+        }
+      });
+
+      window.addEventListener("load", init);
+      window.addEventListener("resize", updateDetectionZone);
+    </script>
+  </body>
+</html>
