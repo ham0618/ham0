@@ -75,6 +75,19 @@
         color: #0f0;
         font-weight: bold;
       }
+
+      #loading {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px 40px;
+        border-radius: 8px;
+        font-size: 16px;
+        z-index: 2000;
+      }
     </style>
   </head>
   <body>
@@ -100,6 +113,8 @@
       </div>
     </div>
 
+    <div id="loading">카메라 및 모델 로딩 중...</div>
+
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -109,6 +124,7 @@
       const webcam = document.getElementById("webcam");
       const canvas = document.getElementById("canvas");
       const canvasCtx = canvas.getContext("2d");
+      const loadingEl = document.getElementById("loading");
 
       const handStatusEl = document.getElementById("hand-status");
       const opennessEl = document.getElementById("openness");
@@ -123,6 +139,7 @@
       let currentSeekRatio = 0;
       let targetSeekRatio = 0;
       let lastHandDetected = false;
+      let isProcessing = false;
 
       // MediaPipe Hands 설정
       const hands = new Hands({
@@ -140,26 +157,36 @@
 
       hands.onResults(onResults);
 
-      // 웹캠 설정
-      navigator.mediaDevices
-        .getUserMedia({
-          video: {
-            width: 640,
-            height: 480,
-          },
-        })
-        .then((stream) => {
-          webcam.srcObject = stream;
-          webcam.addEventListener("loadeddata", () => {
-            canvas.width = webcam.videoWidth;
-            canvas.height = webcam.videoHeight;
-            processFrame();
+      // 웹캠 설정 (맥북 최적화)
+      async function initCamera() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user",
+              frameRate: { ideal: 30 }
+            },
+            audio: false
           });
-        })
-        .catch((err) => {
+
+          webcam.srcObject = stream;
+          
+          return new Promise((resolve) => {
+            webcam.onloadedmetadata = () => {
+              webcam.play();
+              canvas.width = webcam.videoWidth;
+              canvas.height = webcam.videoHeight;
+              console.log(`카메라 해상도: ${canvas.width}x${canvas.height}`);
+              resolve();
+            };
+          });
+        } catch (err) {
           console.error("웹캠 오류:", err);
           alert("웹캠에 접근할 수 없습니다. 카메라 권한을 허용해주세요.");
-        });
+          throw err;
+        }
+      }
 
       function onResults(results) {
         // 캔버스 초기화
@@ -202,6 +229,7 @@
         }
 
         canvasCtx.restore();
+        isProcessing = false;
       }
 
       function calculateHandOpenness(landmarks) {
@@ -250,8 +278,14 @@
       }
 
       async function processFrame() {
-        if (webcam.readyState === webcam.HAVE_ENOUGH_DATA) {
-          await hands.send({ image: webcam });
+        if (!isProcessing && webcam.readyState === webcam.HAVE_ENOUGH_DATA) {
+          isProcessing = true;
+          try {
+            await hands.send({ image: webcam });
+          } catch (err) {
+            console.error("프레임 처리 오류:", err);
+            isProcessing = false;
+          }
         }
         requestAnimationFrame(processFrame);
       }
@@ -275,6 +309,25 @@
         requestAnimationFrame(updateVideo);
       }
 
+      // 초기화
+      async function init() {
+        try {
+          // 카메라 초기화
+          await initCamera();
+          
+          // 로딩 메시지 제거
+          loadingEl.style.display = "none";
+          
+          // 프레임 처리 시작
+          processFrame();
+          
+          console.log("초기화 완료");
+        } catch (err) {
+          loadingEl.textContent = "초기화 실패: " + err.message;
+          loadingEl.style.color = "#f00";
+        }
+      }
+
       // 비디오 메타데이터 로드 시 컨트롤 루프 시작
       video.addEventListener("loadedmetadata", () => {
         updateVideo();
@@ -284,6 +337,9 @@
       video.addEventListener("play", () => {
         video.pause();
       });
+
+      // 페이지 로드 시 초기화
+      window.addEventListener("load", init);
     </script>
   </body>
 </html>
