@@ -1,703 +1,198 @@
 <!DOCTYPE html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>핀치 제스처 비디오 컨트롤</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pink Tour | Gesture Video Control</title>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #000; font-family: 'Pretendard', sans-serif; }
 
-      body {
-        overflow: hidden;
-        background: #000;
-        font-family: Arial, sans-serif;
-      }
+        /* 메인 비디오 전력 질주 */
+        #video {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            object-fit: cover; z-index: 1;
+        }
 
-      #video {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        object-fit: cover;
-        z-index: 1;
-      }
-
-      #webcam-container {
-        position: fixed;
-        bottom: 30px;
-        left: 30px;
-        width: 400px;
-        height: 225px;
-        background: #000;
-        border: 3px solid #333;
-        border-radius: 10px;
-        overflow: hidden;
-        z-index: 100;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-      }
-
-      #webcam {
-        display: none;
-      }
-
-      #canvas {
-        width: 100%;
-        height: 100%;
-        display: block;
-        transform: scaleX(-1);
-      }
-
-      #gesture-guide {
-        position: absolute;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.9);
-        color: #0f0;
-        padding: 8px 15px;
-        border-radius: 5px;
-        font-size: 12px;
-        z-index: 20;
-        font-weight: bold;
-        text-align: center;
-        border: 2px solid #0f0;
-        transition: all 0.3s ease;
-      }
-
-      #status {
-        position: fixed;
-        top: 20px;
-        left: 20px;
-        background: rgba(0, 0, 0, 0.9);
-        color: white;
-        padding: 20px 25px;
-        border-radius: 10px;
-        font-size: 14px;
-        z-index: 1000;
-        min-width: 320px;
-        border: 2px solid #333;
-      }
-
-      #status h3 {
-        color: #0f0;
-        margin-bottom: 15px;
-        font-size: 16px;
-        border-bottom: 1px solid #333;
-        padding-bottom: 8px;
-      }
-
-      #status div {
-        margin: 8px 0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .label {
-        color: #aaa;
-        font-size: 13px;
-      }
-
-      .value {
-        color: #0f0;
-        font-weight: bold;
-        font-size: 14px;
-      }
-
-      .value.playing {
-        color: #00ff00;
-        animation: pulse 1s infinite;
-      }
-
-      .value.rewinding {
-        color: #ff6600;
-        animation: pulse 1s infinite;
-      }
-
-      @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
-      }
-
-      #progress-bar {
-        margin-top: 15px;
-        padding-top: 15px;
-        border-top: 1px solid #333;
-      }
-
-      #progress-track {
-        width: 100%;
-        height: 8px;
-        background: #333;
-        border-radius: 4px;
-        overflow: hidden;
-        position: relative;
-      }
-
-      #progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #0f0, #0a0);
-        width: 0%;
-        border-radius: 4px;
-      }
-
-      #loading {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.95);
-        color: white;
-        padding: 30px 60px;
-        border-radius: 12px;
-        font-size: 18px;
-        z-index: 2000;
-        border: 2px solid #333;
-        text-align: center;
-      }
-
-      #loading-status {
-        margin-top: 12px;
-        font-size: 14px;
-        color: #aaa;
-      }
-
-      #instructions {
-        position: fixed;
-        top: 50%;
-        right: 30px;
-        transform: translateY(-50%);
-        background: rgba(0, 0, 0, 0.9);
-        color: white;
-        padding: 25px;
-        border-radius: 10px;
-        font-size: 14px;
-        z-index: 1000;
-        max-width: 280px;
-        border: 2px solid #0f0;
-      }
-
-      #instructions h3 {
-        color: #0f0;
-        margin-bottom: 15px;
-        font-size: 16px;
-      }
-
-      #instructions ul {
-        list-style: none;
-        padding: 0;
-      }
-
-      #instructions li {
-        margin: 12px 0;
-        padding-left: 25px;
-        position: relative;
-      }
-
-      #instructions li:before {
-        content: "👉";
-        position: absolute;
-        left: 0;
-      }
-
-      #debug {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.85);
-        color: #0ff;
-        padding: 15px;
-        border-radius: 8px;
-        font-size: 11px;
-        z-index: 1000;
-        max-width: 300px;
-        border: 2px solid #333;
-        max-height: 200px;
-        overflow-y: auto;
-      }
-
-      @media (max-width: 768px) {
+        /* 웹캠 오버레이 */
         #webcam-container {
-          width: 320px;
-          height: 180px;
-          bottom: 15px;
-          left: 15px;
+            position: fixed; bottom: 30px; left: 30px; width: 320px; height: 180px;
+            background: #000; border: 2px solid #0f0; border-radius: 12px;
+            overflow: hidden; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
+        #webcam { display: none; }
+        #canvas { width: 100%; height: 100%; transform: scaleX(-1); display: block; }
 
-        #instructions {
-          display: none;
+        /* 상태 UI */
+        #status-card {
+            position: fixed; top: 20px; left: 20px; z-index: 1000;
+            background: rgba(0, 0, 0, 0.8); color: #fff; padding: 20px;
+            border-radius: 12px; border: 1px solid #333; min-width: 250px;
+            backdrop-filter: blur(10px);
         }
-      }
+        .label { color: #888; font-size: 12px; text-transform: uppercase; }
+        .value { color: #0f0; font-weight: bold; font-family: monospace; }
+        .progress-bar {
+            width: 100%; height: 4px; background: #333; margin-top: 10px; border-radius: 2px;
+        }
+        #fill { height: 100%; background: #0f0; width: 0%; transition: width 0.1s linear; }
+
+        /* 로딩 화면 */
+        #loading {
+            position: fixed; inset: 0; background: #000; color: #0f0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 2000; font-weight: bold;
+        }
     </style>
-  </head>
-  <body>
-    <video id="video" src="01.mp4" preload="auto" muted loop></video>
+</head>
+<body>
 
-    <div id="webcam-container">
-      <div id="gesture-guide">👌 엄지와 검지를 벌리세요</div>
-      <video id="webcam" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
+<video id="video" src="01.mp4" preload="auto" muted loop></video>
+
+<div id="loading">
+    <div>SYSTEM INITIALIZING...</div>
+    <div id="load-msg" style="font-size: 12px; color: #666; margin-top: 10px;">Loading AI Models...</div>
+</div>
+
+<div id="status-card">
+    <div style="margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+        <span style="color: #0f0;">⚡ PRO MODE</span>
     </div>
+    <div><span class="label">Gesture:</span> <span id="g-stat" class="value">IDLE</span></div>
+    <div><span class="label">Speed:</span> <span id="s-stat" class="value">1.0x</span></div>
+    <div class="progress-bar"><div id="fill"></div></div>
+</div>
 
-    <div id="status">
-      <h3>📊 상태 정보</h3>
-      <div>
-        <span class="label">손 감지:</span>
-        <span class="value" id="hand-status">❌ 없음</span>
-      </div>
-      <div>
-        <span class="label">제스처:</span>
-        <span class="value" id="gesture-status">⏸️ 대기</span>
-      </div>
-      <div>
-        <span class="label">손가락 거리:</span>
-        <span class="value" id="distance">0.0</span>
-      </div>
-      <div>
-        <span class="label">비디오 상태:</span>
-        <span class="value" id="video-state">⏸️ 정지</span>
-      </div>
-      <div>
-        <span class="label">현재 시간:</span>
-        <span class="value" id="position">0.0초</span>
-      </div>
-      <div>
-        <span class="label">FPS:</span>
-        <span class="value" id="fps">0</span>
-      </div>
-      <div id="progress-bar">
-        <div id="progress-track">
-          <div id="progress-fill"></div>
-        </div>
-      </div>
-    </div>
+<div id="webcam-container">
+    <video id="webcam" playsinline></video>
+    <canvas id="canvas"></canvas>
+</div>
 
-    <div id="instructions">
-      <h3>🎮 사용 방법</h3>
-      <ul>
-        <li><strong>손가락 벌리기:</strong><br>엄지와 검지를 벌리면<br>영상이 앞으로 재생</li>
-        <li><strong>손가락 모으기:</strong><br>엄지와 검지를 모으면<br>영상이 뒤로 되감기</li>
-        <li><strong>거리 조절:</strong><br>손가락 거리에 따라<br>재생 속도 조절</li>
-      </ul>
-    </div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-    <div id="debug">
-      <div style="color: #0f0; margin-bottom: 5px;">🔍 디버그 로그</div>
-      <div id="debug-info">초기화 중...</div>
-    </div>
+<script>
+    const video = document.getElementById('video');
+    const webcam = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const fill = document.getElementById('fill');
+    
+    // --- 최적화 설정값 ---
+    const PINCH_VAL = 0.04;    // 모으기 기준 (되감기)
+    const OPEN_VAL = 0.12;     // 벌리기 기준 (재생)
+    const SMOOTHING = 0.25;    // 필터링 (높을수록 반응빠름, 낮을수록 부드러움)
+    
+    let smoothedDistance = 0;
+    let targetRate = 0;
+    let lastTime = performance.now();
 
-    <div id="loading">
-      <div>🎥 시스템 초기화 중...</div>
-      <div id="loading-status">준비 중...</div>
-    </div>
+    // 1. Hands 모델 초기화 (RTX 5070 Ti 파워 활용)
+    const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-
-    <script>
-      const video = document.getElementById("video");
-      const webcam = document.getElementById("webcam");
-      const canvas = document.getElementById("canvas");
-      const canvasCtx = canvas.getContext("2d");
-      const loadingEl = document.getElementById("loading");
-      const loadingStatusEl = document.getElementById("loading-status");
-      const gestureGuide = document.getElementById("gesture-guide");
-      const debugInfo = document.getElementById("debug-info");
-
-      const handStatusEl = document.getElementById("hand-status");
-      const gestureStatusEl = document.getElementById("gesture-status");
-      const distanceEl = document.getElementById("distance");
-      const videoStateEl = document.getElementById("video-state");
-      const positionEl = document.getElementById("position");
-      const fpsEl = document.getElementById("fps");
-      const progressFill = document.getElementById("progress-fill");
-
-      // 상수
-      const PINCH_THRESHOLD = 0.05;  
-      const OPEN_THRESHOLD = 0.15;   
-      const FRAME_STEP = 1/30;       // 30fps 기준 프레임 간격
-
-      // 상태
-      let isProcessing = false;
-      let lastFrameTime = Date.now();
-      let frameCount = 0;
-      let fps = 0;
-      let cameraReady = false;
-      let handsReady = false;
-      
-      let currentDistance = 0;
-      let isPlaying = false;
-      let isRewinding = false;
-      let videoDuration = 0;
-      let videoInitialized = false;
-
-      // 디버그 로그
-      function log(message) {
-        console.log(message);
-        const timestamp = new Date().toLocaleTimeString();
-        debugInfo.innerHTML = `[${timestamp}] ${message}<br>` + debugInfo.innerHTML.split('<br>').slice(0, 10).join('<br>');
-      }
-
-      // MediaPipe Hands 설정
-      const hands = new Hands({
-        locateFile: (file) => {
-          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        },
-      });
-
-      hands.setOptions({
+    hands.setOptions({
         maxNumHands: 1,
-        modelComplexity: 0,
-        minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.6,
-      });
+        modelComplexity: 1, // 0은 빠르고 1은 정확함. 혜림님 사양이면 1 추천!
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+    });
 
-      hands.onResults(onResults);
+    hands.onResults(onResults);
 
-      // 웹캠 초기화
-      async function initCamera() {
-        try {
-          log("📷 카메라 초기화 시작");
-          loadingStatusEl.textContent = "카메라 권한 요청 중...";
+    // 2. 메인 루프: 비디오 제어 (requestAnimationFrame 사용)
+    function update() {
+        const now = performance.now();
+        const dt = (now - lastTime) / 1000; // 프레임 간 시간 간격
+        lastTime = now;
 
-          const constraints = {
-            video: {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              facingMode: "user",
-              frameRate: { ideal: 30 }
-            },
-            audio: false
-          };
-
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          
-          log("✅ 카메라 스트림 획득");
-          webcam.srcObject = stream;
-          
-          return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(new Error("카메라 로딩 타임아웃"));
-            }, 10000);
-
-            webcam.onloadedmetadata = () => {
-              clearTimeout(timeout);
-              
-              webcam.play().then(() => {
-                canvas.width = 640;
-                canvas.height = 360;
-                
-                log(`✅ 카메라 준비 완료`);
-                cameraReady = true;
-                resolve();
-              }).catch(reject);
-            };
-          });
-        } catch (err) {
-          log("❌ 카메라 오류: " + err.message);
-          throw err;
-        }
-      }
-
-      // 엄지와 검지 사이 거리 계산
-      function calculatePinchDistance(landmarks) {
-        const thumbTip = landmarks[4];
-        const indexTip = landmarks[8];
-
-        const dx = thumbTip.x - indexTip.x;
-        const dy = thumbTip.y - indexTip.y;
-        const dz = (thumbTip.z || 0) - (indexTip.z || 0);
-        
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
-      }
-
-      // 손 결과 처리
-      function onResults(results) {
-        if (!cameraReady) return;
-
-        // FPS 계산
-        frameCount++;
-        const now = Date.now();
-        if (now - lastFrameTime >= 1000) {
-          fps = frameCount;
-          fpsEl.textContent = fps;
-          frameCount = 0;
-          lastFrameTime = now;
+        if (targetRate > 0) {
+            // 정방향 재생: 브라우저 네이티브 엔진 사용
+            video.playbackRate = targetRate;
+            if (video.paused) video.play().catch(()=>{});
+            document.getElementById('g-stat').textContent = "FORWARD";
+            document.getElementById('g-stat').style.color = "#0f0";
+        } else if (targetRate < 0) {
+            // 역방향 재생: 수동 currentTime 조절 (가장 부드러움)
+            video.pause();
+            const rewindSpeed = Math.abs(targetRate) * dt;
+            video.currentTime = Math.max(0, video.currentTime - rewindSpeed);
+            document.getElementById('g-stat').textContent = "REWIND";
+            document.getElementById('g-stat').style.color = "#f60";
+        } else {
+            // 정지
+            video.pause();
+            document.getElementById('g-stat').textContent = "PAUSED";
+            document.getElementById('g-stat').style.color = "#fff";
         }
 
-        // 캔버스 초기화
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-        canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+        // UI 업데이트
+        document.getElementById('s-stat').textContent = (targetRate === 0 ? "0.0" : targetRate.toFixed(1)) + "x";
+        if (video.duration) {
+            fill.style.width = (video.currentTime / video.duration * 100) + "%";
+        }
+
+        requestAnimationFrame(update);
+    }
+
+    // 3. 거리 계산 및 필터링
+    function onResults(results) {
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-          const landmarks = results.multiHandLandmarks[0];
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // 엄지(4)와 검지(8) 거리 측정
+            const dx = landmarks[4].x - landmarks[8].x;
+            const dy = landmarks[4].y - landmarks[8].y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
 
-          // 거리 계산
-          currentDistance = calculatePinchDistance(landmarks);
-          distanceEl.textContent = currentDistance.toFixed(3);
+            // 지수 이동 평균(EMA) 필터링 - 손떨림 보정 핵심
+            smoothedDistance = (dist * SMOOTHING) + (smoothedDistance * (1 - SMOOTHING));
 
-          // 제스처 판단
-          const wasPlaying = isPlaying;
-          const wasRewinding = isRewinding;
+            // 제스처 판정
+            if (smoothedDistance < PINCH_VAL) {
+                targetRate = -2.5; // 모으면 2.5배속 되감기
+            } else if (smoothedDistance > OPEN_VAL) {
+                // 벌린 정도에 따라 0.5x ~ 3.0x 가변 속도
+                const rawRate = 0.5 + (smoothedDistance - OPEN_VAL) * 10;
+                targetRate = Math.min(rawRate, 3.0);
+            } else {
+                targetRate = 0; // 중간 단계는 정지
+            }
 
-          if (currentDistance < PINCH_THRESHOLD) {
-            // 손가락 모음 → 되감기
-            isPlaying = false;
-            isRewinding = true;
-            if (!wasRewinding) log("⏪ 되감기 시작");
-          } else if (currentDistance > OPEN_THRESHOLD) {
-            // 손가락 벌림 → 재생
-            isPlaying = true;
-            isRewinding = false;
-            if (!wasPlaying) log("▶️ 재생 시작");
-          } else {
-            // 중간 → 정지
-            if (wasPlaying || wasRewinding) log("⏸️ 일시정지");
-            isPlaying = false;
-            isRewinding = false;
-          }
-
-          // UI 업데이트
-          let handColor, statusText, guideText, guideColor;
-          
-          if (isRewinding) {
-            handColor = "#FF6600";
-            statusText = "⏪ 되감기";
-            guideText = "⏪ 되감는 중...";
-            guideColor = "#ff6600";
-            gestureStatusEl.className = "value rewinding";
-          } else if (isPlaying) {
-            handColor = "#00FF00";
-            statusText = "▶️ 재생";
-            guideText = "▶️ 재생 중...";
-            guideColor = "#00ff00";
-            gestureStatusEl.className = "value playing";
-          } else {
-            handColor = "#FFAA00";
-            statusText = "⏸️ 일시정지";
-            guideText = "⏸️ 일시정지";
-            guideColor = "#0f0";
-            gestureStatusEl.className = "value";
-          }
-
-          gestureStatusEl.textContent = statusText;
-          gestureGuide.textContent = guideText;
-          gestureGuide.style.borderColor = guideColor;
-          gestureGuide.style.color = guideColor;
-
-          // 손 그리기
-          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
-            color: handColor,
-            lineWidth: 2,
-          });
-          drawLandmarks(canvasCtx, landmarks, {
-            color: "#FF0000",
-            fillColor: handColor,
-            lineWidth: 1,
-            radius: 3,
-          });
-
-          // 엄지와 검지 강조
-          const thumbTip = landmarks[4];
-          const indexTip = landmarks[8];
-
-          // 연결선
-          canvasCtx.beginPath();
-          canvasCtx.moveTo(thumbTip.x * canvas.width, thumbTip.y * canvas.height);
-          canvasCtx.lineTo(indexTip.x * canvas.width, indexTip.y * canvas.height);
-          canvasCtx.strokeStyle = handColor;
-          canvasCtx.lineWidth = 4;
-          canvasCtx.stroke();
-
-          // 엄지
-          canvasCtx.beginPath();
-          canvasCtx.arc(
-            thumbTip.x * canvas.width,
-            thumbTip.y * canvas.height,
-            10,
-            0,
-            2 * Math.PI
-          );
-          canvasCtx.fillStyle = handColor;
-          canvasCtx.fill();
-          canvasCtx.strokeStyle = "#FFF";
-          canvasCtx.lineWidth = 2;
-          canvasCtx.stroke();
-
-          // 검지
-          canvasCtx.beginPath();
-          canvasCtx.arc(
-            indexTip.x * canvas.width,
-            indexTip.y * canvas.height,
-            10,
-            0,
-            2 * Math.PI
-          );
-          canvasCtx.fillStyle = handColor;
-          canvasCtx.fill();
-          canvasCtx.strokeStyle = "#FFF";
-          canvasCtx.lineWidth = 2;
-          canvasCtx.stroke();
-
-          handStatusEl.textContent = "✅ 감지됨";
-          handStatusEl.style.color = "#0f0";
+            // 시각화
+            drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#0f0', lineWidth: 2});
+            drawLandmarks(ctx, landmarks, {color: '#f00', lineWidth: 1, radius: 2});
         } else {
-          // 손 없음
-          if (isPlaying || isRewinding) log("👋 손 감지 중단");
-          isPlaying = false;
-          isRewinding = false;
-          handStatusEl.textContent = "❌ 없음";
-          handStatusEl.style.color = "#f00";
-          gestureStatusEl.textContent = "⏸️ 대기";
-          gestureStatusEl.className = "value";
-          gestureGuide.textContent = "👌 엄지와 검지를 보여주세요";
-          gestureGuide.style.borderColor = "#0f0";
-          gestureGuide.style.color = "#0f0";
+            targetRate = 0; // 손이 없으면 정지
         }
+        ctx.restore();
+    }
 
-        canvasCtx.restore();
-        isProcessing = false;
-      }
+    // 4. 초기화 실행
+    async function init() {
+        const camera = new Camera(webcam, {
+            onFrame: async () => {
+                await hands.send({image: webcam});
+            },
+            width: 640,
+            height: 360
+        });
 
-      // 프레임 처리
-      async function processFrame() {
-        if (!cameraReady || !handsReady) {
-          requestAnimationFrame(processFrame);
-          return;
-        }
+        video.addEventListener('loadedmetadata', () => {
+            document.getElementById('loading').style.display = 'none';
+            camera.start();
+            update(); // 렌더 루프 시작
+            console.log("System Ready.");
+        });
+    }
 
-        if (!isProcessing && webcam.readyState === webcam.HAVE_ENOUGH_DATA) {
-          isProcessing = true;
-          try {
-            await hands.send({ image: webcam });
-          } catch (err) {
-            console.error("프레임 처리 오류:", err);
-            isProcessing = false;
-          }
-        }
-        requestAnimationFrame(processFrame);
-      }
-
-      // 비디오 업데이트 - 완전히 새로운 방식
-      function updateVideo() {
-        if (videoDuration > 0 && videoInitialized) {
-          
-          if (isPlaying) {
-            // 재생: currentTime을 증가시키고 비디오 업데이트
-            let newTime = video.currentTime + FRAME_STEP;
-            if (newTime >= videoDuration) {
-              newTime = 0; // 루프
-            }
-            video.currentTime = newTime;
-            videoStateEl.textContent = "▶️ 재생 중";
-            videoStateEl.className = "value playing";
-            
-          } else if (isRewinding) {
-            // 되감기: currentTime을 감소시키고 비디오 업데이트
-            let newTime = video.currentTime - FRAME_STEP;
-            if (newTime < 0) {
-              newTime = 0;
-            }
-            video.currentTime = newTime;
-            videoStateEl.textContent = "⏪ 되감기 중";
-            videoStateEl.className = "value rewinding";
-            
-          } else {
-            // 정지
-            videoStateEl.textContent = "⏸️ 정지";
-            videoStateEl.className = "value";
-          }
-
-          // UI 업데이트
-          positionEl.textContent = `${video.currentTime.toFixed(1)}초 / ${videoDuration.toFixed(1)}초`;
-          const progress = (video.currentTime / videoDuration) * 100;
-          progressFill.style.width = `${progress}%`;
-        }
-
-        requestAnimationFrame(updateVideo);
-      }
-
-      // 초기화
-      async function init() {
-        try {
-          log("🚀 초기화 시작");
-          
-          // 1. 비디오 로드
-          log("📹 비디오 로딩 중...");
-          loadingStatusEl.textContent = "비디오 로딩 중...";
-          
-          await new Promise((resolve, reject) => {
-            video.addEventListener('loadedmetadata', () => {
-              videoDuration = video.duration;
-              video.currentTime = 0;
-              log(`✅ 비디오 로드 완료 (${videoDuration.toFixed(1)}초)`);
-              loadingStatusEl.textContent = "비디오 로드 완료";
-              resolve();
-            }, { once: true });
-
-            video.addEventListener('error', (e) => {
-              reject(new Error('비디오 로드 실패'));
-            }, { once: true });
-
-            video.load();
-          });
-
-          // 비디오 준비 완료
-          await new Promise((resolve) => {
-            video.addEventListener('canplaythrough', () => {
-              videoInitialized = true;
-              log("✅ 비디오 재생 준비 완료");
-              resolve();
-            }, { once: true });
-          });
-
-          // 2. 카메라 초기화
-          await initCamera();
-
-          // 3. MediaPipe Hands 준비
-          log("🤖 AI 모델 준비 중...");
-          loadingStatusEl.textContent = "AI 모델 준비 중...";
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          handsReady = true;
-          log("✅ AI 모델 준비 완료");
-
-          // 4. 로딩 화면 숨기기
-          setTimeout(() => {
-            loadingEl.style.display = "none";
-            log("✅ 모든 초기화 완료!");
-          }, 500);
-          
-          // 5. 시작
-          processFrame();
-          updateVideo();
-          
-          console.log("✅ 시스템 준비 완료!");
-        } catch (err) {
-          log("❌ 초기화 실패: " + err.message);
-          console.error("초기화 실패:", err);
-          loadingEl.innerHTML = `
-            <div>❌ 초기화 실패</div>
-            <div style="margin-top: 10px; font-size: 14px; color: #f00;">${err.message}</div>
-            <div style="margin-top: 10px; font-size: 12px; color: #aaa;">페이지를 새로고침해주세요</div>
-          `;
-        }
-      }
-
-      // 메모리 정리
-      window.addEventListener("beforeunload", () => {
-        if (webcam.srcObject) {
-          webcam.srcObject.getTracks().forEach(track => track.stop());
-        }
-      });
-
-      window.addEventListener("load", init);
-    </script>
-  </body>
+    window.onload = init;
+</script>
+</body>
 </html>
