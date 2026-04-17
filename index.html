@@ -66,6 +66,7 @@
         font-weight: bold;
         text-align: center;
         border: 2px solid #0f0;
+        transition: all 0.3s ease;
       }
 
       #status {
@@ -120,7 +121,7 @@
 
       @keyframes pulse {
         0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
+        50% { opacity: 0.6; }
       }
 
       #progress-bar {
@@ -142,7 +143,6 @@
         height: 100%;
         background: linear-gradient(90deg, #0f0, #0a0);
         width: 0%;
-        transition: width 0.1s ease;
         border-radius: 4px;
       }
 
@@ -236,7 +236,7 @@
     </style>
   </head>
   <body>
-    <video id="video" src="01.mp4" preload="auto" muted></video>
+    <video id="video" src="01.mp4" preload="auto"></video>
 
     <div id="webcam-container">
       <div id="gesture-guide">👌 엄지와 검지를 벌리세요</div>
@@ -259,8 +259,8 @@
         <span class="value" id="distance">0.0</span>
       </div>
       <div>
-        <span class="label">비디오 상태:</span>
-        <span class="value" id="video-state">⏸️ 정지</span>
+        <span class="label">재생 속도:</span>
+        <span class="value" id="playback-rate">1.0x</span>
       </div>
       <div>
         <span class="label">현재 시간:</span>
@@ -313,16 +313,17 @@
       const handStatusEl = document.getElementById("hand-status");
       const gestureStatusEl = document.getElementById("gesture-status");
       const distanceEl = document.getElementById("distance");
-      const videoStateEl = document.getElementById("video-state");
+      const playbackRateEl = document.getElementById("playback-rate");
       const positionEl = document.getElementById("position");
       const fpsEl = document.getElementById("fps");
       const progressFill = document.getElementById("progress-fill");
 
-      // 상수
-      const PINCH_THRESHOLD = 0.05;  // 손가락 모은 상태 임계값
-      const OPEN_THRESHOLD = 0.15;   // 손가락 벌린 상태 임계값
-      const PLAYBACK_SPEED = 0.05;   // 재생 속도 (초/프레임) - 증가
-      const REWIND_SPEED = 0.05;     // 되감기 속도 (초/프레임) - 증가
+      // 상수 - 부드러운 재생을 위한 조정
+      const PINCH_THRESHOLD = 0.05;  // 손가락 모은 상태
+      const OPEN_THRESHOLD = 0.15;   // 손가락 벌린 상태
+      const MIN_PLAYBACK_RATE = 0.5; // 최소 재생 속도
+      const MAX_PLAYBACK_RATE = 2.0; // 최대 재생 속도
+      const RATE_SMOOTHING = 0.15;   // 속도 변화 부드럽게
 
       // 상태
       let isProcessing = false;
@@ -333,9 +334,8 @@
       let handsReady = false;
       
       let currentDistance = 0;
-      let isPlaying = false;
-      let isRewinding = false;
-      let currentTime = 0;
+      let targetPlaybackRate = 0;
+      let currentPlaybackRate = 0;
       let videoDuration = 0;
 
       // 디버그 로그
@@ -439,15 +439,30 @@
 
       // 엄지와 검지 사이 거리 계산
       function calculatePinchDistance(landmarks) {
-        const thumbTip = landmarks[4];   // 엄지 끝
-        const indexTip = landmarks[8];   // 검지 끝
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
 
         const dx = thumbTip.x - indexTip.x;
         const dy = thumbTip.y - indexTip.y;
         const dz = (thumbTip.z || 0) - (indexTip.z || 0);
         
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        return distance;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // 거리를 재생 속도로 변환
+      function distanceToPlaybackRate(distance) {
+        if (distance < PINCH_THRESHOLD) {
+          // 모으면 되감기 (음수)
+          return -MAX_PLAYBACK_RATE;
+        } else if (distance > OPEN_THRESHOLD) {
+          // 벌리면 재생 (양수)
+          // 거리에 비례해서 속도 증가
+          const normalized = Math.min((distance - OPEN_THRESHOLD) / 0.2, 1);
+          return MIN_PLAYBACK_RATE + (MAX_PLAYBACK_RATE - MIN_PLAYBACK_RATE) * normalized;
+        } else {
+          // 중간은 정지
+          return 0;
+        }
       }
 
       // 손 결과 처리
@@ -467,62 +482,46 @@
         // 캔버스 초기화
         canvasCtx.save();
         canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // 웹캠 영상 그리기
         canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
           const landmarks = results.multiHandLandmarks[0];
 
-          // 엄지와 검지 거리 계산
+          // 거리 계산 및 재생 속도 결정
           currentDistance = calculatePinchDistance(landmarks);
+          targetPlaybackRate = distanceToPlaybackRate(currentDistance);
+          
           distanceEl.textContent = currentDistance.toFixed(3);
 
-          // 제스처 판단
-          const wasPlaying = isPlaying;
-          const wasRewinding = isRewinding;
-
-          if (currentDistance < PINCH_THRESHOLD) {
-            // 손가락 모음 → 되감기
-            isPlaying = false;
-            isRewinding = true;
-            if (!wasRewinding) {
-              log("⏪ 되감기 시작");
-            }
-            gestureStatusEl.textContent = "⏪ 되감기";
+          // 제스처 상태 업데이트
+          let handColor, statusText, guideText, guideColor;
+          
+          if (targetPlaybackRate < 0) {
+            handColor = "#FF6600";
+            statusText = "⏪ 되감기";
+            guideText = "⏪ 되감는 중...";
+            guideColor = "#ff6600";
             gestureStatusEl.className = "value rewinding";
-            gestureGuide.textContent = "⏪ 되감는 중...";
-            gestureGuide.style.borderColor = "#ff6600";
-            gestureGuide.style.color = "#ff6600";
-          } else if (currentDistance > OPEN_THRESHOLD) {
-            // 손가락 벌림 → 재생
-            isPlaying = true;
-            isRewinding = false;
-            if (!wasPlaying) {
-              log("▶️ 재생 시작");
-            }
-            gestureStatusEl.textContent = "▶️ 재생";
+          } else if (targetPlaybackRate > 0) {
+            handColor = "#00FF00";
+            statusText = "▶️ 재생";
+            guideText = "▶️ 재생 중...";
+            guideColor = "#00ff00";
             gestureStatusEl.className = "value playing";
-            gestureGuide.textContent = "▶️ 재생 중...";
-            gestureGuide.style.borderColor = "#00ff00";
-            gestureGuide.style.color = "#00ff00";
           } else {
-            // 중간 상태 → 일시정지
-            if (wasPlaying || wasRewinding) {
-              log("⏸️ 일시정지");
-            }
-            isPlaying = false;
-            isRewinding = false;
-            gestureStatusEl.textContent = "⏸️ 일시정지";
+            handColor = "#FFAA00";
+            statusText = "⏸️ 일시정지";
+            guideText = "⏸️ 일시정지";
+            guideColor = "#0f0";
             gestureStatusEl.className = "value";
-            gestureGuide.textContent = "⏸️ 일시정지";
-            gestureGuide.style.borderColor = "#0f0";
-            gestureGuide.style.color = "#0f0";
           }
 
+          gestureStatusEl.textContent = statusText;
+          gestureGuide.textContent = guideText;
+          gestureGuide.style.borderColor = guideColor;
+          gestureGuide.style.color = guideColor;
+
           // 손 그리기
-          const handColor = isPlaying ? "#00FF00" : (isRewinding ? "#FF6600" : "#FFAA00");
-          
           drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
             color: handColor,
             lineWidth: 2,
@@ -538,7 +537,7 @@
           const thumbTip = landmarks[4];
           const indexTip = landmarks[8];
 
-          // 연결선 그리기
+          // 연결선
           canvasCtx.beginPath();
           canvasCtx.moveTo(thumbTip.x * canvas.width, thumbTip.y * canvas.height);
           canvasCtx.lineTo(indexTip.x * canvas.width, indexTip.y * canvas.height);
@@ -546,7 +545,7 @@
           canvasCtx.lineWidth = 4;
           canvasCtx.stroke();
 
-          // 엄지 강조
+          // 엄지
           canvasCtx.beginPath();
           canvasCtx.arc(
             thumbTip.x * canvas.width,
@@ -561,7 +560,7 @@
           canvasCtx.lineWidth = 2;
           canvasCtx.stroke();
 
-          // 검지 강조
+          // 검지
           canvasCtx.beginPath();
           canvasCtx.arc(
             indexTip.x * canvas.width,
@@ -579,12 +578,8 @@
           handStatusEl.textContent = "✅ 감지됨";
           handStatusEl.style.color = "#0f0";
         } else {
-          // 손 없음
-          if (isPlaying || isRewinding) {
-            log("👋 손 감지 중단");
-          }
-          isPlaying = false;
-          isRewinding = false;
+          // 손 없음 - 정지
+          targetPlaybackRate = 0;
           handStatusEl.textContent = "❌ 없음";
           handStatusEl.style.color = "#f00";
           gestureStatusEl.textContent = "⏸️ 대기";
@@ -600,7 +595,7 @@
 
       // 프레임 처리
       let lastProcessTime = 0;
-      const PROCESS_INTERVAL = 33; // ~30fps
+      const PROCESS_INTERVAL = 33;
 
       async function processFrame() {
         if (!cameraReady || !handsReady) {
@@ -619,60 +614,51 @@
             await hands.send({ image: webcam });
           } catch (err) {
             console.error("프레임 처리 오류:", err);
-            log("⚠️ 프레임 처리 오류");
             isProcessing = false;
           }
         }
         requestAnimationFrame(processFrame);
       }
 
-      // 비디오 업데이트 (최적화)
-      let lastVideoUpdateTime = 0;
-      const VIDEO_UPDATE_INTERVAL = 16; // ~60fps
-
+      // 비디오 업데이트 - playbackRate 사용으로 부드럽게!
       function updateVideo() {
-        const now = Date.now();
-        
-        if (videoDuration > 0 && now - lastVideoUpdateTime >= VIDEO_UPDATE_INTERVAL) {
-          lastVideoUpdateTime = now;
+        if (videoDuration > 0) {
+          // 부드러운 속도 전환
+          currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * RATE_SMOOTHING;
 
-          // 재생
-          if (isPlaying) {
-            currentTime += PLAYBACK_SPEED;
-            if (currentTime > videoDuration) {
-              currentTime = videoDuration;
-              isPlaying = false;
-              log("⏹️ 영상 끝 도달");
-            }
-            videoStateEl.textContent = "▶️ 재생 중";
-            videoStateEl.className = "value playing";
-          }
-          // 되감기
-          else if (isRewinding) {
-            currentTime -= REWIND_SPEED;
-            if (currentTime < 0) {
-              currentTime = 0;
-              isRewinding = false;
-              log("⏹️ 영상 시작 도달");
-            }
-            videoStateEl.textContent = "⏪ 되감기 중";
-            videoStateEl.className = "value rewinding";
-          }
-          // 정지
-          else {
-            videoStateEl.textContent = "⏸️ 정지";
-            videoStateEl.className = "value";
+          // 매우 작은 값은 0으로
+          if (Math.abs(currentPlaybackRate) < 0.01) {
+            currentPlaybackRate = 0;
           }
 
-          // 비디오 시간 업데이트 (직접 설정)
-          if (Math.abs(video.currentTime - currentTime) > 0.1) {
-            video.currentTime = currentTime;
+          // 비디오 재생 속도 설정
+          if (currentPlaybackRate > 0) {
+            // 정방향 재생
+            video.playbackRate = currentPlaybackRate;
+            if (video.paused) {
+              video.play().catch(err => {
+                console.log("재생 오류:", err);
+              });
+            }
+          } else if (currentPlaybackRate < 0) {
+            // 역방향은 수동으로 처리
+            video.pause();
+            const newTime = video.currentTime + (currentPlaybackRate / 60);
+            if (newTime >= 0) {
+              video.currentTime = newTime;
+            } else {
+              video.currentTime = 0;
+            }
+          } else {
+            // 정지
+            video.pause();
           }
 
           // UI 업데이트
-          positionEl.textContent = `${currentTime.toFixed(1)}초 / ${videoDuration.toFixed(1)}초`;
+          playbackRateEl.textContent = `${currentPlaybackRate.toFixed(1)}x`;
+          positionEl.textContent = `${video.currentTime.toFixed(1)}초 / ${videoDuration.toFixed(1)}초`;
           
-          const progress = (currentTime / videoDuration) * 100;
+          const progress = (video.currentTime / videoDuration) * 100;
           progressFill.style.width = `${progress}%`;
         }
 
@@ -692,8 +678,8 @@
           await new Promise((resolve) => {
             video.addEventListener('loadedmetadata', () => {
               videoDuration = video.duration;
-              currentTime = 0;
               video.currentTime = 0;
+              video.playbackRate = 1.0;
               log(`✅ 비디오 로드 완료 (${videoDuration.toFixed(1)}초)`);
               loadingStatusEl.textContent = "비디오 로드 완료";
               resolve();
@@ -733,18 +719,11 @@
         }
       }
 
-      // 비디오 자동 재생 방지
-      video.addEventListener("play", (e) => {
-        if (!isPlaying) {
-          video.pause();
-        }
-      });
-
-      // 비디오 시간 동기화
-      video.addEventListener("timeupdate", () => {
-        if (!isPlaying && !isRewinding) {
-          currentTime = video.currentTime;
-        }
+      // 비디오 끝 처리
+      video.addEventListener('ended', () => {
+        video.currentTime = videoDuration;
+        video.pause();
+        log("⏹️ 영상 끝 도달");
       });
 
       // 메모리 정리
